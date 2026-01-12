@@ -18,6 +18,8 @@ import { registerPublishingRoutes, setAppStore } from './publishing-routes.js';
 import { registerIntegrationsRoutes } from './integrations-routes.js';
 import { registerAppAnalysisRoutes } from './app-analysis-routes.js';
 import { registerAppRoutes } from './app-routes.js';
+import { registerDebugRoutes } from './debug-routes.js';
+import { addErrorToBuffer } from './utils/debug-helper.js';
 // Lazy import for migrations - only load when modify endpoint is called
 // This allows server to start even if migrations package isn't built yet
 const fetch =
@@ -146,6 +148,15 @@ server.setErrorHandler((error, request, reply) => {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:59',message:'Global error handler ENTRY',data:{method:request.method,url:request.url,errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
   // #endregion
+  
+  // Add error to debug buffer for AI assistant analysis
+  addErrorToBuffer(error, {
+    method: request.method,
+    url: request.url,
+    replySent: reply.sent,
+    replyStatusCode: reply.statusCode,
+  });
+  
   logger.error('Unhandled server error', error, {
     method: request.method,
     url: request.url,
@@ -1205,6 +1216,12 @@ const start = async () => {
     await registerIntegrationsRoutes(server);
     await registerAppAnalysisRoutes(server);
     await registerPublishingRoutes(server);
+    
+    // Register debug routes (for AI assistant debugging)
+    await registerDebugRoutes(server, {
+      appStore,
+      config,
+    });
     
     // Register app routes (discover and create)
     await registerAppRoutes(server, {
