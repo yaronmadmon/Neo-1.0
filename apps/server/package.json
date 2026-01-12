@@ -23,6 +23,7 @@
     "@neo/runtime": "*",
     "@neo/safety": "*",
     "@neo/templates": "*",
+    "@sentry/node": "^10.33.0",
     "fastify": "^4.26.2",
     "pino-pretty": "^10.2.3"
   },

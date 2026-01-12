@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AppCategory, AppPrivacyLevel, type App, type UserPreferences } from '@neo/contracts';
 import type { ProcessedIntent } from '@neo/blueprint-engine';
 import { logger } from './utils/logger.js';
+import { captureException, setRequestContext, addBreadcrumb } from './utils/sentry.js';
 import { randomUUID } from 'node:crypto';
 
 // These will be injected when routes are registered
@@ -87,6 +88,19 @@ export async function registerAppRoutes(
       } 
     }>, reply: FastifyReply) => {
       try {
+        // Set request context for Sentry
+        setRequestContext({
+          method: request.method,
+          url: request.url,
+          headers: request.headers as Record<string, string>,
+          body: request.body,
+        });
+        
+        addBreadcrumb('Discovery endpoint called', 'http', {
+          method: request.method,
+          url: request.url,
+        });
+        
         const { input, answers, discoveredInfo: existingInfo } = request.body;
 
         // Validate input
@@ -127,6 +141,16 @@ export async function registerAppRoutes(
         });
       } catch (error: any) {
         console.error('Discovery endpoint error:', error);
+        
+        // Capture error in Sentry with full context
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        captureException(errorObj, {
+          endpoint: '/api/apps/discover',
+          inputLength: request.body?.input?.length,
+          hasAnswers: !!request.body?.answers,
+          hasDiscoveredInfo: !!request.body?.discoveredInfo,
+        });
+        
         logger.error('Discovery failed', error, {
           inputLength: request.body?.input?.length,
         });
@@ -176,6 +200,20 @@ export async function registerAppRoutes(
       } 
     }>, reply: FastifyReply) => {
       try {
+        // Set request context for Sentry
+        setRequestContext({
+          method: request.method,
+          url: request.url,
+          headers: request.headers as Record<string, string>,
+          body: { ...request.body, input: request.body.input?.substring(0, 100) + '...' }, // Truncate input for privacy
+        });
+        
+        addBreadcrumb('Create app endpoint called', 'http', {
+          method: request.method,
+          url: request.url,
+          category: request.body?.category,
+        });
+        
         // Rate limiting
         const clientId = request.ip || 'unknown';
         if (!checkRateLimit(`create:${clientId}`, config.rateLimit.createApp.max, config.rateLimit.createApp.windowMs)) {
@@ -289,6 +327,18 @@ export async function registerAppRoutes(
         return reply.code(200).type('application/json').send(responsePayload);
       } catch (error: any) {
         console.error('Create endpoint error:', error);
+        
+        // Capture error in Sentry with full context
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        captureException(errorObj, {
+          endpoint: '/api/apps/create',
+          inputLength: request.body?.input?.length,
+          category: request.body?.category,
+          hasDiscoveredInfo: !!request.body?.discoveredInfo,
+          errorName: error?.name,
+          errorType: error?.constructor?.name,
+        });
+        
         logger.error('App creation failed', error, {
           inputLength: request.body?.input?.length,
           category: request.body?.category,

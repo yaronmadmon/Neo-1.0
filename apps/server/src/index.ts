@@ -20,6 +20,11 @@ import { registerAppAnalysisRoutes } from './app-analysis-routes.js';
 import { registerAppRoutes } from './app-routes.js';
 import { registerDebugRoutes } from './debug-routes.js';
 import { addErrorToBuffer } from './utils/debug-helper.js';
+import { initSentry, captureException, setRequestContext, addBreadcrumb } from './utils/sentry.js';
+
+// Initialize Sentry FIRST (before anything else)
+initSentry();
+
 // Lazy import for migrations - only load when modify endpoint is called
 // This allows server to start even if migrations package isn't built yet
 const fetch =
@@ -148,6 +153,35 @@ server.setErrorHandler((error, request, reply) => {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:59',message:'Global error handler ENTRY',data:{method:request.method,url:request.url,errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
   // #endregion
+  
+  // Set request context for Sentry
+  setRequestContext({
+    method: request.method,
+    url: request.url,
+    headers: request.headers as Record<string, string>,
+    body: request.body,
+    query: request.query,
+    params: request.params,
+  });
+  
+  // Capture error in Sentry
+  if (error instanceof Error) {
+    captureException(error, {
+      method: request.method,
+      url: request.url,
+      replySent: reply.sent,
+      replyStatusCode: reply.statusCode,
+    });
+  } else {
+    // If it's not an Error object, convert it
+    captureException(new Error(String(error)), {
+      method: request.method,
+      url: request.url,
+      replySent: reply.sent,
+      replyStatusCode: reply.statusCode,
+      originalError: error,
+    });
+  }
   
   // Add error to debug buffer for AI assistant analysis
   addErrorToBuffer(error, {
@@ -1202,8 +1236,25 @@ process.on('uncaughtException', (error: Error) => {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:uncaughtException',message:'UNCAUGHT EXCEPTION',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
   // #endregion
+  
+  // Capture in Sentry before exiting
+  captureException(error, { type: 'uncaughtException' });
+  
   logger.error('Uncaught exception', error);
   process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  
+  // Capture in Sentry
+  captureException(error, { 
+    type: 'unhandledRejection',
+    promise: String(promise),
+  });
+  
+  logger.error('Unhandled promise rejection', error);
 });
 
 // Start server

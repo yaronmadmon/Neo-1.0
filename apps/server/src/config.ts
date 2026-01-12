@@ -28,4 +28,7 @@ export const config = {
       windowMs: 3600000, // 1 hour
     },
   },
+  
+  // Sentry Configuration
+  sentryDsn: process.env.SENTRY_DSN,
 };
