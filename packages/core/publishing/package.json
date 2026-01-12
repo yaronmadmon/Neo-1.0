@@ -1,0 +1,25 @@
+{
+  "name": "@neo/publishing",
+  "version": "1.0.0",
+  "description": "Publishing and versioning system for Neo apps",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@neo/blueprint-engine": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

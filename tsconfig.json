@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/premium" },
+    { "path": "./packages/safety" },
+    { "path": "./packages/core/ai-engine" },
+    { "path": "./packages/core/templates" },
+    { "path": "./packages/core/discovery" },
+    { "path": "./packages/core/blueprint-engine" },
+    { "path": "./packages/core/app-generator" },
+    { "path": "./packages/core/runtime" },
+    { "path": "./packages/core/migrations" },
+    { "path": "./packages/core/database" },
+    { "path": "./apps/server" }
+  ]
+}
+
+
+
+
+
+

@@ -1,0 +1,35 @@
+{
+  "name": "neo-1.0",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -b",
+    "dev": "powershell -ExecutionPolicy Bypass -File ./start-servers.ps1",
+    "dev:server": "cd apps/server && npm run build && npm run dev",
+    "dev:web": "cd apps/web && npm run dev",
+    "dev:watch": "concurrently \"tsc -b --watch\" \"nodemon\"",
+    "lint": "echo lint_placeholder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "private": "true",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/core/*"
+  ],
+  "devDependencies": {
+    "@rolldown/pluginutils": "^1.0.0-beta.59",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^20.11.30",
+    "concurrently": "^9.2.1",
+    "debug": "^4.3.5",
+    "nodemon": "^3.1.11",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0",
+    "zod": "^3.23.8"
+  }
+}

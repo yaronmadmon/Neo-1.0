@@ -1,0 +1,45 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+    "./src/components/**/*.{js,ts,jsx,tsx}", // Explicitly include components
+  ],
+  safelist: [
+    // Safelist all classes used in ComponentRegistry
+    'text-3xl', 'text-2xl', 'text-xl', 'text-base',
+    'font-bold', 'font-semibold', 'font-medium',
+    'mb-4', 'mb-3', 'mb-2', 'mb-1',
+    'space-y-3', 'space-y-2', 'space-y-4', 'space-y-1',
+    'p-4', 'p-6', 'px-4', 'py-2', 'px-6', 'py-3', 'py-4',
+    'bg-white', 'bg-gray-50', 'bg-gray-100', 'bg-yellow-50',
+    'border', 'border-gray-200', 'border-gray-300', 'border-yellow-200',
+    'rounded-lg', 'rounded',
+    'shadow-sm', 'shadow-md', 'shadow-xl',
+    'hover:shadow-md', 'hover:bg-gray-50', 'hover:bg-purple-700', 'hover:bg-gray-300', 'hover:text-purple-600', 'hover:bg-purple-50', 'hover:text-gray-600',
+    'text-gray-600', 'text-gray-700', 'text-gray-900', 'text-gray-500', 'text-gray-400',
+    'transition-shadow', 'transition-colors',
+    'max-w-full', 'max-w-2xl', 'h-auto', 'h-64',
+    'flex', 'flex-col', 'items-center', 'justify-center',
+    'w-full', 'whitespace-nowrap',
+    'text-xs', 'text-sm', 'text-lg',
+    'uppercase', 'tracking-wider',
+    'divide-y', 'divide-gray-200',
+    'bg-purple-600', 'bg-purple-700', 'text-white',
+    'bg-gray-200', 'text-gray-800',
+    'disabled:opacity-50', 'disabled:cursor-not-allowed',
+    'focus:ring-2', 'focus:ring-purple-500', 'focus:border-transparent',
+    'text-red-500',
+    'text-center',
+    'border-2', 'border-dashed',
+    'fixed', 'inset-0', 'z-50',
+    'bg-black', 'bg-opacity-50',
+    'max-h-[90vh]', 'overflow-y-auto', 'overflow-x-auto',
+    'min-w-full',
+    'grid', 'grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3', 'lg:grid-cols-4', 'gap-6',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}

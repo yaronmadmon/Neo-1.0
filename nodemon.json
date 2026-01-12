@@ -1,0 +1,9 @@
+{
+  "watch": ["apps/server/src"],
+  "ext": "ts,js,json",
+  "ignore": ["apps/server/src/**/*.test.ts"],
+  "exec": "npm run build && node --enable-source-maps apps/server/dist/index.js",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

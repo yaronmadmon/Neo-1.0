@@ -1,0 +1,33 @@
+{
+  "name": "@neo/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc -b ../../packages/core/blueprint-engine && node ../../node_modules/typescript/bin/tsc -b",
+    "dev": "node --env-file=.env --enable-source-maps dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@neo/ai-engine": "*",
+    "@neo/app-generator": "*",
+    "@neo/blueprint-engine": "*",
+    "@neo/contracts": "*",
+    "@neo/database": "*",
+    "@neo/discovery": "*",
+    "@neo/integrations": "*",
+    "@neo/migrations": "*",
+    "@neo/premium": "*",
+    "@neo/runtime": "*",
+    "@neo/safety": "*",
+    "@neo/templates": "*",
+    "fastify": "^4.26.2",
+    "pino-pretty": "^10.2.3"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6"
+  }
+}

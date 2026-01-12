@@ -1,0 +1,25 @@
+{
+  "name": "@neo/ai-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@neo/contracts": "*",
+    "@neo/safety": "*",
+    "openai": "^4.47.0",
+    "web-streams-polyfill": "^3.3.3"
+  }
+}
