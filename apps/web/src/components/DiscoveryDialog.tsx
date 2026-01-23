@@ -18,7 +18,6 @@ export interface DiscoveryQuestion {
 export interface DiscoveryDialogProps {
   questions: DiscoveryQuestion[];
   onAnswer: (answers: Record<string, unknown>) => void;
-  onSkip?: () => void;
   onCancel?: () => void;
   isLoading?: boolean;
 }
@@ -26,7 +25,6 @@ export interface DiscoveryDialogProps {
 export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
   questions,
   onAnswer,
-  onSkip,
   onCancel,
   isLoading = false,
 }) => {
@@ -73,14 +71,6 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
     }
   };
 
-  const handleSkip = () => {
-    if (onSkip) {
-      onSkip();
-    } else {
-      // If no skip handler, submit empty answers
-      onAnswer({});
-    }
-  };
 
   if (questions.length === 0) {
     return null;
@@ -185,7 +175,7 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
           ))}
         </div>
 
-        {/* Footer */}
+        {/* Footer - Mandatory discovery (no skip) */}
         <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center bg-gray-50">
           <div className="flex gap-3">
             {onCancel && (
@@ -195,15 +185,6 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
                 className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Cancel
-              </button>
-            )}
-            {onSkip && (
-              <button
-                onClick={handleSkip}
-                disabled={isLoading}
-                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Skip
               </button>
             )}
           </div>

@@ -127,7 +127,7 @@ export async function registerIntegrationsRoutes(server: FastifyInstance): Promi
     };
   }>(
     '/api/apps/:appId/integrations',
-    async (request: FastifyRequest<{ Params: { appId: string }; Body: any }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { appId: string }; Body: { providerId: IntegrationProviderId; displayName?: string; settings: Record<string, any>; enabled?: boolean } }>, reply: FastifyReply) => {
       try {
         const { appId } = request.params;
         const { providerId, displayName, settings, enabled = true } = request.body;

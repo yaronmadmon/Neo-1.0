@@ -137,7 +137,11 @@ export class RelationResolver {
       case 'many_to_one':
       case 'one_to_one': {
         // Foreign key is on source, fetch single target
-        const fkValue = sourceRecord[relation.foreignKey];
+        const foreignKey = relation.foreignKey;
+        if (!foreignKey) {
+          throw new Error(`Relation '${relation.name}' is missing a foreign key`);
+        }
+        const fkValue = sourceRecord[foreignKey];
         if (fkValue) {
           const { sql, params } = query(targetTable, this.schema)
             .where({ field: 'id', operator: 'eq', value: fkValue })
@@ -255,13 +259,17 @@ export class RelationResolver {
       case 'one_to_one': {
         // Get source records to find FK values
         const sourceTable = this.toTableName(entity);
+        const foreignKey = relation.foreignKey;
+        if (!foreignKey) {
+          throw new Error(`Relation '${relation.name}' is missing a foreign key`);
+        }
         const sourceRecords = await this.db.query<Record<string, unknown>>(
-          `SELECT id, "${relation.foreignKey}" FROM "${this.schema}"."${sourceTable}" WHERE id = ANY($1)`,
+          `SELECT id, "${foreignKey}" FROM "${this.schema}"."${sourceTable}" WHERE id = ANY($1)`,
           [recordIds]
         );
 
         // Get unique FK values
-        const fkValues = [...new Set(sourceRecords.map(r => r[relation.foreignKey]).filter(Boolean))];
+        const fkValues = [...new Set(sourceRecords.map(r => r[foreignKey]).filter(Boolean))];
         
         if (fkValues.length > 0) {
           const targetRecords = await this.db.query<T>(
@@ -272,7 +280,7 @@ export class RelationResolver {
           // Map back to source records
           const targetMap = new Map(targetRecords.map(r => [(r as any).id, r]));
           for (const source of sourceRecords) {
-            const target = targetMap.get(source[relation.foreignKey] as string);
+            const target = targetMap.get(source[foreignKey] as string);
             if (target) {
               results.set(source.id as string, [target]);
             }
@@ -354,8 +362,12 @@ export class RelationResolver {
       case 'one_to_one': {
         // Update source record with FK
         const sourceTable = this.toTableName(entity);
+        const foreignKey = relation.foreignKey;
+        if (!foreignKey) {
+          throw new Error(`Relation '${relation.name}' is missing a foreign key`);
+        }
         await this.db.execute(
-          `UPDATE "${this.schema}"."${sourceTable}" SET "${relation.foreignKey}" = $1 WHERE id = $2`,
+          `UPDATE "${this.schema}"."${sourceTable}" SET "${foreignKey}" = $1 WHERE id = $2`,
           [targetId, recordId]
         );
         break;
@@ -411,8 +423,12 @@ export class RelationResolver {
       case 'one_to_one': {
         // Set FK to NULL on source
         const sourceTable = this.toTableName(entity);
+        const foreignKey = relation.foreignKey;
+        if (!foreignKey) {
+          throw new Error(`Relation '${relation.name}' is missing a foreign key`);
+        }
         await this.db.execute(
-          `UPDATE "${this.schema}"."${sourceTable}" SET "${relation.foreignKey}" = NULL WHERE id = $1`,
+          `UPDATE "${this.schema}"."${sourceTable}" SET "${foreignKey}" = NULL WHERE id = $1`,
           [recordId]
         );
         break;

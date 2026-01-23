@@ -49,7 +49,7 @@ export async function registerAppAnalysisRoutes(server: FastifyInstance): Promis
     Body: { changeIds: string[]; planId?: string };
   }>(
     '/api/apps/:appId/improve',
-    async (request: FastifyRequest<{ Params: { appId: string }; Body: any }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { appId: string }; Body: { changeIds: string[]; planId?: string } }>, reply: FastifyReply) => {
       try {
         const { appId } = request.params;
         const { changeIds, planId } = request.body;
@@ -92,7 +92,7 @@ export async function registerAppAnalysisRoutes(server: FastifyInstance): Promis
     Body: { question?: string };
   }>(
     '/api/apps/:appId/explain',
-    async (request: FastifyRequest<{ Params: { appId: string }; Body: any }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { appId: string }; Body: { question?: string } }>, reply: FastifyReply) => {
       try {
         const { appId } = request.params;
         const { question } = request.body;

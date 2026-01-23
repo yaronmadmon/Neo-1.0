@@ -206,6 +206,16 @@ export type {
   ThemeBuildContext,
   DataModelContext,
 } from './dna/index.js';
+export type { NeoRole, NeoAccessRule, NeoPermissions } from './dna/index.js';
+export {
+  hasRolePermission,
+  ROLE_HIERARCHY,
+  createDefaultPermissions,
+  createPageAccessRule,
+  createFieldAccessRule,
+  createRowAccessRule,
+  createActionAccessRule,
+} from './dna/index.js';
 
 // ============================================================
 // UNIFIED API

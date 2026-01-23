@@ -197,7 +197,7 @@ export class PermissionsService {
       for (const rule of rowRules) {
         // Check if rule applies to user's role
         const roleMatches = rule.roles.includes(this.context.role) ||
-          rule.roles.some(role => hasRolePermission(this.context.role, role));
+          rule.roles.some((role: NeoRole) => hasRolePermission(this.context.role, role));
 
         if (!roleMatches) continue;
 
@@ -263,7 +263,7 @@ export class PermissionsService {
     if (!permissions) return [];
 
     return permissions.rules.filter(
-      rule => rule.type === 'page_access' &&
+      (rule: NeoAccessRule) => rule.type === 'page_access' &&
         rule.pageId === pageId &&
         rule.enabled !== false
     );
@@ -277,7 +277,7 @@ export class PermissionsService {
     if (!permissions) return [];
 
     return permissions.rules.filter(
-      rule => rule.type === 'field_access' &&
+      (rule: NeoAccessRule) => rule.type === 'field_access' &&
         rule.entityId === entityId &&
         rule.fieldId === fieldId &&
         rule.enabled !== false
@@ -292,7 +292,7 @@ export class PermissionsService {
     if (!permissions) return [];
 
     return permissions.rules.filter(
-      rule => rule.type === 'row_access' &&
+      (rule: NeoAccessRule) => rule.type === 'row_access' &&
         rule.entityId === entityId &&
         rule.enabled !== false
     );
@@ -306,7 +306,7 @@ export class PermissionsService {
     if (!permissions) return [];
 
     return permissions.rules.filter(
-      rule => rule.type === 'action_access' &&
+      (rule: NeoAccessRule) => rule.type === 'action_access' &&
         rule.actionId === actionId &&
         rule.enabled !== false
     );

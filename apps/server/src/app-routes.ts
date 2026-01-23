@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 
 // These will be injected when routes are registered
 let discoveryHandler: any;
+let mandatoryDiscoveryHandler: any;
 let appGenerator: any;
 let neoEngine: any;
 let safetyOrchestrator: any;
@@ -29,6 +30,7 @@ export async function registerAppRoutes(
   server: FastifyInstance,
   dependencies: {
     discoveryHandler: any;
+    mandatoryDiscoveryHandler: any;
     appGenerator: any;
     neoEngine: any;
     safetyOrchestrator: any;
@@ -42,6 +44,7 @@ export async function registerAppRoutes(
 ): Promise<void> {
   // Inject dependencies
   discoveryHandler = dependencies.discoveryHandler;
+  mandatoryDiscoveryHandler = dependencies.mandatoryDiscoveryHandler;
   appGenerator = dependencies.appGenerator;
   neoEngine = dependencies.neoEngine;
   safetyOrchestrator = dependencies.safetyOrchestrator;
@@ -53,15 +56,14 @@ export async function registerAppRoutes(
   materializedAppToTheme = dependencies.materializedAppToTheme;
 
   /**
-   * Discovery endpoint - analyze input and return questions if needed
+   * Discovery endpoint - MANDATORY discovery flow that always runs
    * POST /api/apps/discover
    */
   server.post<{ 
     Body: { 
       input: string; 
-      conversationId?: string; 
-      answers?: Record<string, unknown>; 
-      discoveredInfo?: any;
+      state?: { currentStep: number; context?: 'business' | 'home'; answers: Record<string, unknown> };
+      answers?: Record<string, unknown>;
     } 
   }>(
     '/api/apps/discover',
@@ -71,9 +73,8 @@ export async function registerAppRoutes(
           type: 'object',
           properties: {
             input: { type: 'string' },
-            conversationId: { type: 'string' },
+            state: { type: 'object' },
             answers: { type: 'object' },
-            discoveredInfo: { type: 'object' },
           },
           required: ['input'],
         },
@@ -82,84 +83,279 @@ export async function registerAppRoutes(
     async (request: FastifyRequest<{ 
       Body: { 
         input: string; 
-        conversationId?: string; 
-        answers?: Record<string, unknown>; 
-        discoveredInfo?: any;
+        state?: { currentStep: number; context?: 'business' | 'home'; answers: Record<string, unknown> };
+        answers?: Record<string, unknown>;
       } 
     }>, reply: FastifyReply) => {
+      // Wrap entire handler in try/catch to guarantee a response
       try {
-        // Set request context for Sentry
-        setRequestContext({
-          method: request.method,
-          url: request.url,
-          headers: request.headers as Record<string, string>,
-          body: request.body,
-        });
+        // Add DEFAULTS at the top - DO NOT destructure without defaults
+        const body = request.body ?? {};
+        const input = body.input ?? "";
+        const state = body.state ?? { currentStep: 0, answers: {} };
+        const answers = body.answers ?? {};
         
-        addBreadcrumb('Discovery endpoint called', 'http', {
-          method: request.method,
-          url: request.url,
-        });
+        // Log input at the start
+        console.log('DISCOVER INPUT:', JSON.stringify({ input, state, answers }, null, 2));
         
-        const { input, answers, discoveredInfo: existingInfo } = request.body;
+        // Set request context for Sentry - wrap in try/catch to prevent crashes
+        try {
+          setRequestContext({
+            method: request.method,
+            url: request.url,
+            headers: request.headers as Record<string, string>,
+            body: request.body,
+          });
+          
+          addBreadcrumb('Mandatory discovery endpoint called', 'http', {
+            method: request.method,
+            url: request.url,
+          });
+        } catch (sentryError) {
+          console.error('Sentry context failed:', sentryError);
+          // Continue - don't fail the request
+        }
 
-        // Validate input
+        // Defensive guard: If input is missing or empty, return safe fallback
         if (!input || typeof input !== 'string' || input.trim().length === 0) {
-          return reply.code(400).type('application/json').send({
-            success: false,
-            error: 'Invalid input',
-            message: 'Input is required and must be a non-empty string',
-          });
-        }
-
-        // Analyze input for discovery needs
-        const discoveryResult = await discoveryHandler.analyzeInput(input, existingInfo);
-
-        // If answers provided, process them
-        let finalDiscoveredInfo = discoveryResult.discoveredInfo;
-        if (answers && finalDiscoveredInfo) {
-          finalDiscoveredInfo = discoveryHandler.processAnswers(finalDiscoveredInfo, answers);
-          // Re-analyze with updated info to see if more questions are needed
-          const reanalyzed = await discoveryHandler.analyzeInput(input, finalDiscoveredInfo);
+          console.log('Input missing or empty, returning safe fallback');
           return reply.code(200).type('application/json').send({
-            success: true,
-            needsClarification: reanalyzed.needsClarification,
-            questions: reanalyzed.questions,
-            discoveredInfo: finalDiscoveredInfo,
-            confidence: reanalyzed.confidence,
-            suggestedFeatures: reanalyzed.suggestedFeatures,
+            needsClarification: true,
+            questions: [],
+            state: {
+              currentStep: 0,
+              answers: {}
+            }
           });
         }
 
+        // If state and answers provided, continue discovery
+        // Use the defaults we set above - state and answers are never null/undefined
+        if (state && Object.keys(state).length > 0 && answers && Object.keys(answers).length > 0) {
+          console.log('Continuing discovery with state:', JSON.stringify(state, null, 2));
+          console.log('Answers:', JSON.stringify(answers, null, 2));
+          
+          // Ensure handler exists before calling
+          if (!mandatoryDiscoveryHandler) {
+            console.error('mandatoryDiscoveryHandler is not initialized!');
+            return reply.code(200).type('application/json').send({
+              needsClarification: true,
+              questions: [],
+              state: {
+                currentStep: 0,
+                answers: {}
+              }
+            });
+          }
+          
+          let result;
+          try {
+            result = mandatoryDiscoveryHandler.continueDiscovery(state, answers);
+            console.log('Continue discovery result type:', typeof result);
+          } catch (handlerError: any) {
+            console.error('Error calling continueDiscovery:', handlerError);
+            console.error('Handler error stack:', handlerError?.stack);
+            throw handlerError; // Re-throw to be caught by outer catch
+          }
+          
+          if (!result) {
+            console.error('Continue discovery result is null/undefined');
+            return reply.code(200).type('application/json').send({
+              needsClarification: true,
+              questions: [],
+              state: {
+                currentStep: 0,
+                answers: {}
+              }
+            });
+          }
+          
+          // Ensure state is serializable
+          const safeState = result.state || { currentStep: 0, answers: {} };
+          const serializableState: {
+            currentStep: number;
+            context?: 'business' | 'home';
+            answers: Record<string, unknown>;
+          } = {
+            currentStep: Number(safeState.currentStep) || 0,
+            answers: typeof safeState.answers === 'object' && safeState.answers !== null 
+              ? { ...safeState.answers } 
+              : {}
+          };
+          
+          // Only include context if it exists and is valid
+          if (safeState.context === 'business' || safeState.context === 'home') {
+            serializableState.context = safeState.context;
+          }
+          
+          // If Home placeholder, return special response
+          if (result.isHomePlaceholder) {
+            return reply.code(200).type('application/json').send({
+              needsClarification: true,
+              isHomePlaceholder: true,
+              questions: [],
+              state: serializableState,
+              message: 'Home discovery coming next',
+            });
+          }
+          
+          // If complete, return AppConfig
+          if (!result.needsClarification && result.appConfig) {
+            return reply.code(200).type('application/json').send({
+              needsClarification: false,
+              appConfig: result.appConfig,
+              state: serializableState,
+            });
+          }
+          
+          // More questions needed
+          const safeQuestions = Array.isArray(result.questions) ? result.questions : [];
+          return reply.code(200).type('application/json').send({
+            needsClarification: true,
+            questions: safeQuestions,
+            state: serializableState,
+          });
+        }
+
+        // Start discovery - always returns questions (gate question)
+        console.log('Starting discovery with input:', input?.substring(0, 50));
+        console.log('mandatoryDiscoveryHandler:', mandatoryDiscoveryHandler ? 'exists' : 'MISSING');
+        
+        if (!mandatoryDiscoveryHandler) {
+          console.error('mandatoryDiscoveryHandler is not initialized!');
+          return reply.code(200).type('application/json').send({
+            needsClarification: true,
+            questions: [],
+            state: {
+              currentStep: 0,
+              answers: {}
+            }
+          });
+        }
+        
+        let result;
+        try {
+          result = mandatoryDiscoveryHandler.startDiscovery(input);
+          console.log('Discovery result type:', typeof result);
+          console.log('Discovery result has questions:', !!result?.questions);
+          console.log('Discovery result has state:', !!result?.state);
+        } catch (handlerError: any) {
+          console.error('Error calling startDiscovery:', handlerError);
+          console.error('Handler error stack:', handlerError?.stack);
+          throw handlerError; // Re-throw to be caught by outer catch
+        }
+        
+        // Validate result structure
+        if (!result) {
+          console.error('Discovery result is null/undefined');
+          return reply.code(200).type('application/json').send({
+            needsClarification: true,
+            questions: [],
+            state: {
+              currentStep: 0,
+              answers: {}
+            }
+          });
+        }
+        
+        // Ensure state and questions are properly structured
+        const safeState = result.state || { currentStep: 0, answers: {} };
+        const safeQuestions = Array.isArray(result.questions) ? result.questions : [];
+        
+        // Ensure state is serializable (remove any non-serializable properties)
+        const serializableState: {
+          currentStep: number;
+          context?: 'business' | 'home';
+          answers: Record<string, unknown>;
+        } = {
+          currentStep: Number(safeState.currentStep) || 0,
+          answers: typeof safeState.answers === 'object' && safeState.answers !== null 
+            ? { ...safeState.answers } 
+            : {}
+        };
+        
+        // Only include context if it exists and is valid
+        if (safeState.context === 'business' || safeState.context === 'home') {
+          serializableState.context = safeState.context;
+        }
+        
+        console.log('Sending discovery response with', safeQuestions.length, 'questions');
+        
+        // Ensure EVERY code path ends with reply.send()
         return reply.code(200).type('application/json').send({
-          success: true,
-          needsClarification: discoveryResult.needsClarification,
-          questions: discoveryResult.questions,
-          discoveredInfo: discoveryResult.discoveredInfo,
-          confidence: discoveryResult.confidence,
-          suggestedFeatures: discoveryResult.suggestedFeatures,
+          needsClarification: true,
+          questions: safeQuestions,
+          state: serializableState,
         });
       } catch (error: any) {
-        console.error('Discovery endpoint error:', error);
+        // On error, NEVER crash. Instead return 200 with error flag
+        console.error("DISCOVERY ERROR:", error);
+        console.error('Error stack:', error?.stack);
+        console.error('Error name:', error?.name);
+        console.error('Error message:', error?.message);
         
-        // Capture error in Sentry with full context
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        captureException(errorObj, {
-          endpoint: '/api/apps/discover',
-          inputLength: request.body?.input?.length,
-          hasAnswers: !!request.body?.answers,
-          hasDiscoveredInfo: !!request.body?.discoveredInfo,
-        });
+        // Capture error in Sentry with full context (wrap in try/catch)
+        try {
+          const errorObj = error instanceof Error ? error : new Error(String(error));
+          captureException(errorObj, {
+            endpoint: '/api/apps/discover',
+            inputLength: request.body?.input?.length,
+            hasAnswers: !!request.body?.answers,
+            hasState: !!request.body?.state,
+          });
+          
+          logger.error('Discovery failed', error, {
+            inputLength: request.body?.input?.length,
+          });
+        } catch (logError) {
+          console.error('Failed to log error to Sentry:', logError);
+        }
         
-        logger.error('Discovery failed', error, {
-          inputLength: request.body?.input?.length,
-        });
-        
-        return reply.code(500).type('application/json').send({
-          success: false,
-          error: 'Discovery failed',
-          message: error.message || 'An error occurred during discovery',
-        });
+        // ALWAYS return a valid JSON response - never crash or send empty response
+        if (!reply.sent) {
+          try {
+            // Create safe response object
+            const errorResponse = {
+              needsClarification: true,
+              error: "discovery_failed",
+              message: error?.message || 'An error occurred during discovery',
+              state: {
+                currentStep: 0,
+                answers: {}
+              }
+            };
+            
+            // Return 200 with error flag (NOT 500)
+            return reply.code(200).type('application/json').send(errorResponse);
+          } catch (sendError: any) {
+            console.error('Failed to send error response:', sendError);
+            console.error('Send error stack:', sendError?.stack);
+            
+            // Last resort: write directly to response
+            if (!reply.sent) {
+              try {
+                const fallbackResponse = JSON.stringify({
+                  needsClarification: true,
+                  error: "discovery_failed",
+                  state: {
+                    currentStep: 0,
+                    answers: {}
+                  }
+                });
+                reply.raw.writeHead(200, { 'Content-Type': 'application/json' });
+                reply.raw.end(fallbackResponse);
+                return; // Important: return after sending
+              } catch (finalError: any) {
+                console.error('CRITICAL: Failed to send any response:', finalError);
+                console.error('Final error stack:', finalError?.stack);
+                // At this point, we've exhausted all options
+                // The global error handler will catch this
+              }
+            }
+          }
+        } else {
+          console.warn('Response already sent when error occurred');
+        }
       }
     }
   );
@@ -173,7 +369,7 @@ export async function registerAppRoutes(
       input: string;
       category?: AppCategory;
       preferences?: UserPreferences;
-      discoveredInfo?: any;
+      appConfig?: any;
     };
   }>(
     '/api/apps/create',
@@ -186,7 +382,7 @@ export async function registerAppRoutes(
             input: { type: 'string', minLength: 1, maxLength: 10000 },
             category: { type: 'string', enum: Object.values(AppCategory) },
             preferences: { type: 'object' },
-            discoveredInfo: { type: 'object' },
+            appConfig: { type: 'object' },
           },
         },
       },
@@ -196,7 +392,7 @@ export async function registerAppRoutes(
         input: string; 
         category?: AppCategory; 
         preferences?: UserPreferences;
-        discoveredInfo?: any;
+        appConfig?: any;
       } 
     }>, reply: FastifyReply) => {
       try {
@@ -224,7 +420,7 @@ export async function registerAppRoutes(
           });
         }
 
-        const { input, category, preferences, discoveredInfo } = request.body;
+        const { input, category, preferences, appConfig } = request.body;
         
         // Validate input is not empty
         if (!input || typeof input !== 'string' || input.trim().length === 0) {
@@ -334,7 +530,7 @@ export async function registerAppRoutes(
           endpoint: '/api/apps/create',
           inputLength: request.body?.input?.length,
           category: request.body?.category,
-          hasDiscoveredInfo: !!request.body?.discoveredInfo,
+          hasAppConfig: !!request.body?.appConfig,
           errorName: error?.name,
           errorType: error?.constructor?.name,
         });
@@ -368,6 +564,92 @@ export async function registerAppRoutes(
           success: false,
           error: 'App creation failed',
           message: errorMessage,
+        });
+      }
+    }
+  );
+
+  /**
+   * Get app by ID endpoint
+   * GET /api/apps/:appId
+   */
+  server.get<{ 
+    Params: { appId: string } 
+  }>(
+    '/api/apps/:appId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          properties: {
+            appId: { type: 'string' },
+          },
+          required: ['appId'],
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Params: { appId: string } }>, reply: FastifyReply) => {
+      try {
+        const { appId } = request.params;
+        
+        console.log('Fetching app:', appId);
+        logger.debug('GET /api/apps/:appId requested', { appId });
+        
+        // Log all stored app IDs for debugging
+        const storedIds = Array.from(appStore.keys());
+        console.log('Stored app IDs:', storedIds);
+        logger.debug('Available app IDs in store', { storedIds, count: storedIds.length });
+        
+        const app = appStore.get(appId);
+        
+        if (!app) {
+          console.log('App not found in store. Requested ID:', appId, 'Available IDs:', storedIds);
+          logger.warn('App not found', { appId, availableIds: storedIds });
+          return reply.code(404).type('application/json').send({
+            success: false,
+            error: 'App not found',
+            message: `App with id ${appId} does not exist`,
+          });
+        }
+        
+        console.log('App found:', appId, 'Name:', app.name);
+        
+        // Serialize app consistently with create endpoint
+        const serializedApp: Record<string, unknown> = {
+          id: String(app.id),
+          name: String(app.name || 'Untitled App'),
+          category: String(app.category || 'personal'),
+          privacyLevel: String(app.privacyLevel || 'private'),
+          version: Number(app.version || 1),
+          createdAt: (app.createdAt instanceof Date ? app.createdAt : new Date(app.createdAt || Date.now())).toISOString(),
+          updatedAt: (app.updatedAt instanceof Date ? app.updatedAt : new Date(app.updatedAt || Date.now())).toISOString(),
+          createdBy: String(app.createdBy || ''),
+          schema: app.schema ? JSON.parse(JSON.stringify(app.schema)) : {},
+          theme: app.theme ? JSON.parse(JSON.stringify(app.theme)) : {},
+          data: app.data ? JSON.parse(JSON.stringify(app.data)) : {},
+          settings: app.settings ? JSON.parse(JSON.stringify(app.settings)) : {},
+        };
+        
+        if (app.description) {
+          serializedApp.description = String(app.description);
+        }
+        
+        logger.info('App retrieved successfully', { appId });
+        
+        return reply.code(200).type('application/json').send({
+          success: true,
+          app: serializedApp,
+        });
+      } catch (error: any) {
+        console.error('Error retrieving app:', error);
+        logger.error('Error retrieving app', error, {
+          appId: request.params.appId,
+        });
+        
+        return reply.code(500).type('application/json').send({
+          success: false,
+          error: 'Internal server error',
+          message: error?.message || 'An error occurred while retrieving the app',
         });
       }
     }

@@ -244,7 +244,7 @@ export async function registerPermissionsRoutes(server: FastifyInstance): Promis
         }
         
         // Remove rule
-        permissions.rules = permissions.rules.filter(r => r.id !== ruleId);
+        permissions.rules = permissions.rules.filter((r: NeoAccessRule) => r.id !== ruleId);
         
         // Save
         appPermissions.set(appId, permissions);

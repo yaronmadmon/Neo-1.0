@@ -6,6 +6,19 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { log, getRequestId } from './logger.js';
 
+const ingestUrl = 'http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526';
+const safeIngest = (payload: Record<string, unknown>) => {
+  const fetchFn = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
+  if (!fetchFn) {
+    return;
+  }
+  fetchFn(ingestUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+};
+
 /**
  * Request logging middleware for Fastify
  */
@@ -14,7 +27,7 @@ export async function requestLogger(
   reply: FastifyReply
 ): Promise<void> {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'request-logger.ts:onRequest',message:'Request logger ENTRY',data:{method:request.method,url:request.url,replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'J'})}).catch(()=>{});
+  safeIngest({location:'request-logger.ts:onRequest',message:'Request logger ENTRY',data:{method:request.method,url:request.url,replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'J'});
   // #endregion
   try {
     const requestId = getRequestId(request);
@@ -34,7 +47,7 @@ export async function requestLogger(
     });
   } catch (error: any) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'request-logger.ts:catch',message:'Request logger ERROR',data:{errorMessage:error?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'J'})}).catch(()=>{});
+    safeIngest({location:'request-logger.ts:catch',message:'Request logger ERROR',data:{errorMessage:error?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'J'});
     // #endregion
     throw error;
   }

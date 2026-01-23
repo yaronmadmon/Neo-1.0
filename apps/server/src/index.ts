@@ -5,7 +5,7 @@ import { UnifiedAppGenerator } from '@neo/app-generator';
 import { IntentProcessor, createAIProviderFromEnv } from '@neo/ai-engine';
 import { TemplateLibrary } from '@neo/templates';
 import { PromptSanitizer, ContentModerator, OutputValidator, SafetyOrchestrator } from '@neo/safety';
-import { DiscoveryHandler } from '@neo/app-generator';
+import { DiscoveryHandler, MandatoryDiscoveryHandler } from '@neo/app-generator';
 import { neoEngine, type MaterializedApp, type ProcessedIntent } from '../../../packages/core/blueprint-engine/dist/index.js';
 import { config } from './config.js';
 import { ensurePortAvailable, findAvailablePort } from './port-utils.js';
@@ -31,6 +31,14 @@ const fetch =
   typeof globalThis.fetch === 'function'
     ? globalThis.fetch.bind(globalThis)
     : ((..._args: any[]) => Promise.resolve({} as any));
+const ingestUrl = 'http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526';
+const safeIngest = (payload: Record<string, unknown>) => {
+  fetch(ingestUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+};
 
 const server = Fastify({
   logger: {
@@ -71,6 +79,7 @@ const intentProcessor = new IntentProcessor(
 const templates = new TemplateLibrary();
 const appGenerator = new UnifiedAppGenerator(intentProcessor, templates, safetyOrchestrator, aiProvider);
 const discoveryHandler = new DiscoveryHandler();
+const mandatoryDiscoveryHandler = new MandatoryDiscoveryHandler();
 
 // In-memory app store (replace with database in production)
 const appStore = new Map<string, App>();
@@ -150,89 +159,93 @@ function materializedAppToTheme(app: MaterializedApp): App['theme'] {
 
 // Global error handler to ensure all errors return valid JSON
 server.setErrorHandler((error, request, reply) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:59',message:'Global error handler ENTRY',data:{method:request.method,url:request.url,errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-  
-  // Set request context for Sentry
-  setRequestContext({
-    method: request.method,
-    url: request.url,
-    headers: request.headers as Record<string, string>,
-    body: request.body,
-    query: request.query,
-    params: request.params,
-  });
-  
-  // Capture error in Sentry
-  if (error instanceof Error) {
-    captureException(error, {
+  const errorResponse = {
+    success: false,
+    error: 'Internal server error',
+    message: error?.message || 'An unexpected error occurred',
+  };
+
+  try {
+    // #region agent log
+    safeIngest({location:'index.ts:59',message:'Global error handler ENTRY',data:{method:request.method,url:request.url,errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'});
+    // #endregion
+
+    // Set request context for Sentry
+    setRequestContext({
+      method: request.method,
+      url: request.url,
+      headers: request.headers as Record<string, string>,
+      body: request.body,
+      query: request.query,
+      params: request.params,
+    });
+
+    // Capture error in Sentry
+    if (error instanceof Error) {
+      captureException(error, {
+        method: request.method,
+        url: request.url,
+        replySent: reply.sent,
+        replyStatusCode: reply.statusCode,
+      });
+    } else {
+      captureException(new Error(String(error)), {
+        method: request.method,
+        url: request.url,
+        replySent: reply.sent,
+        replyStatusCode: reply.statusCode,
+        originalError: error,
+      });
+    }
+
+    // Add error to debug buffer for AI assistant analysis
+    addErrorToBuffer(error, {
       method: request.method,
       url: request.url,
       replySent: reply.sent,
       replyStatusCode: reply.statusCode,
     });
-  } else {
-    // If it's not an Error object, convert it
-    captureException(new Error(String(error)), {
+
+    logger.error('Unhandled server error', error, {
       method: request.method,
       url: request.url,
-      replySent: reply.sent,
-      replyStatusCode: reply.statusCode,
-      originalError: error,
     });
+  } catch (handlerError: any) {
+    logger.error('Error handler failed while logging', handlerError);
   }
-  
-  // Add error to debug buffer for AI assistant analysis
-  addErrorToBuffer(error, {
-    method: request.method,
-    url: request.url,
-    replySent: reply.sent,
-    replyStatusCode: reply.statusCode,
-  });
-  
-  logger.error('Unhandled server error', error, {
-    method: request.method,
-    url: request.url,
-  });
-  
+
   // Check if response already sent
   if (reply.sent) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:69',message:'Global error handler - reply already sent',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+    safeIngest({location:'index.ts:69',message:'Global error handler - reply already sent',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'});
     // #endregion
     return;
   }
-  
+
   try {
-    const errorResponse = {
-      success: false,
-      error: 'Internal server error',
-      message: error.message || 'An unexpected error occurred',
-    };
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:76',message:'Global error handler BEFORE reply.send',data:{responseBody:JSON.stringify(errorResponse),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    safeIngest({location:'index.ts:76',message:'Global error handler BEFORE reply.send',data:{responseBody:JSON.stringify(errorResponse),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
     // #endregion
     return reply.code(500).type('application/json').send(errorResponse);
   } catch (sendError: any) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:85',message:'Global error handler reply.send FAILED',data:{sendError:sendError?.message,sendErrorStack:sendError?.stack?.substring(0,200),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    safeIngest({location:'index.ts:85',message:'Global error handler reply.send FAILED',data:{sendError:sendError?.message,sendErrorStack:sendError?.stack?.substring(0,200),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
     // #endregion
     logger.error('Failed to send error response', sendError);
     // Try to send a basic response using raw if available
     if (!reply.sent) {
       try {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:91',message:'Global error handler trying raw.writeHead',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:91',message:'Global error handler trying raw.writeHead',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
         reply.raw.writeHead(500, { 'Content-Type': 'application/json' });
         reply.raw.end(JSON.stringify({ success: false, error: 'Internal server error', message: 'Failed to send error response' }));
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:94',message:'Global error handler raw.writeHead SUCCESS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:94',message:'Global error handler raw.writeHead SUCCESS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
       } catch (rawError: any) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:97',message:'Global error handler raw.writeHead FAILED',data:{rawError:rawError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:97',message:'Global error handler raw.writeHead FAILED',data:{rawError:rawError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
         logger.error('Failed to send raw error response', rawError);
       }
@@ -263,16 +276,16 @@ function checkRateLimit(key: string, max: number, windowMs: number): boolean {
 // Register request logging middleware
 server.addHook('onRequest', async (request, reply) => {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:onRequest-hook',message:'onRequest hook ENTRY',data:{method:request.method,url:request.url,replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'})}).catch(()=>{});
+  safeIngest({location:'index.ts:onRequest-hook',message:'onRequest hook ENTRY',data:{method:request.method,url:request.url,replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'});
   // #endregion
   try {
     await requestLogger(request, reply);
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:onRequest-hook',message:'onRequest hook EXIT',data:{method:request.method,url:request.url},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'})}).catch(()=>{});
+    safeIngest({location:'index.ts:onRequest-hook',message:'onRequest hook EXIT',data:{method:request.method,url:request.url},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'});
     // #endregion
   } catch (error: any) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:onRequest-hook',message:'onRequest hook ERROR',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'})}).catch(()=>{});
+    safeIngest({location:'index.ts:onRequest-hook',message:'onRequest hook ERROR',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'F'});
     // #endregion
     throw error;
   }
@@ -280,6 +293,25 @@ server.addHook('onRequest', async (request, reply) => {
 
 // Register response logging hook
 server.addHook('onSend', async (request, reply, payload) => {
+  const isEmptyPayload =
+    payload === undefined ||
+    payload === null ||
+    (typeof payload === 'string' && payload.length === 0) ||
+    (Buffer.isBuffer(payload) && payload.length === 0);
+
+  if (reply.statusCode >= 400 && isEmptyPayload) {
+    reply.header('content-type', 'application/json');
+    return JSON.stringify({
+      success: false,
+      error: 'Internal server error',
+      message: 'An error occurred while processing the request',
+      statusCode: reply.statusCode,
+    });
+  }
+
+  if (reply.statusCode >= 400 && !reply.getHeader('content-type')) {
+    reply.header('content-type', 'application/json');
+  }
   const startTime = (request as any).startTime;
   const requestId = (request as any).id;
   if (startTime && requestId) {
@@ -321,16 +353,16 @@ server.post<{ Body: { input: string; conversationId?: string; answers?: Record<s
   async (request: FastifyRequest<{ Body: { input: string; conversationId?: string; answers?: Record<string, unknown>; discoveredInfo?: any } }>, reply: FastifyReply) => {
     try {
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:120',message:'Discovery endpoint called',data:{inputLength:request.body?.input?.length,hasAnswers:!!request.body?.answers},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:120',message:'Discovery endpoint called',data:{inputLength:request.body?.input?.length,hasAnswers:!!request.body?.answers},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
       const { input, answers, discoveredInfo: existingInfo } = request.body;
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:124',message:'Before discoveryHandler.analyzeInput',data:{inputLength:input?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:124',message:'Before discoveryHandler.analyzeInput',data:{inputLength:input?.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
       // Analyze input for discovery needs
       const discoveryResult = await discoveryHandler.analyzeInput(input, existingInfo);
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:127',message:'After discoveryHandler.analyzeInput',data:{hasResult:!!discoveryResult,needsClarification:discoveryResult?.needsClarification},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:127',message:'After discoveryHandler.analyzeInput',data:{hasResult:!!discoveryResult,needsClarification:discoveryResult?.needsClarification},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
 
       // If answers provided, process them
@@ -360,7 +392,7 @@ server.post<{ Body: { input: string; conversationId?: string; answers?: Record<s
     } catch (error: any) {
       console.error('Discovery endpoint error:', error);
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:151',message:'Discovery endpoint catch block',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:151',message:'Discovery endpoint catch block',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
       logger.error('Discovery failed', error, {
         inputLength: request.body.input?.length,
@@ -372,12 +404,12 @@ server.post<{ Body: { input: string; conversationId?: string; answers?: Record<s
           message: error.message || 'An error occurred during discovery',
         };
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:160',message:'Discovery endpoint sending error response',data:{responseBody:JSON.stringify(errorResponse)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+        safeIngest({location:'index.ts:160',message:'Discovery endpoint sending error response',data:{responseBody:JSON.stringify(errorResponse)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'});
         // #endregion
         return reply.code(500).type('application/json').send(errorResponse);
       } catch (sendError: any) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:166',message:'Discovery endpoint failed to send error response',data:{sendError:sendError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:166',message:'Discovery endpoint failed to send error response',data:{sendError:sendError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
         logger.error('Failed to send discovery error response', sendError);
         if (!reply.sent) {
@@ -416,7 +448,7 @@ server.post<{
   async (request: FastifyRequest<{ Body: { input: string; category?: AppCategory; preferences?: UserPreferences } }>, reply: FastifyReply) => {
     try {
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:235',message:'Create endpoint ENTRY',data:{method:request.method,url:request.url,hasBody:!!request.body,replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+      safeIngest({location:'index.ts:235',message:'Create endpoint ENTRY',data:{method:request.method,url:request.url,hasBody:!!request.body,replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'});
       // #endregion
       // Rate limiting
       const clientId = request.ip || 'unknown';
@@ -440,7 +472,7 @@ server.post<{
       }
       
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:200',message:'Before neoEngine.generateApp',data:{inputLength:input?.length,category},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:200',message:'Before neoEngine.generateApp',data:{inputLength:input?.length,category},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
       const processedIntent: ProcessedIntent = {
         rawInput: input,
@@ -449,7 +481,7 @@ server.post<{
       };
       const generated = await neoEngine.generateApp(processedIntent);
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:270',message:'AFTER neoEngine.generateApp',data:{hasBlueprint:!!generated?.blueprint,blueprintId:generated?.blueprint?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      safeIngest({location:'index.ts:270',message:'AFTER neoEngine.generateApp',data:{hasBlueprint:!!generated?.blueprint,blueprintId:generated?.blueprint?.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
       // #endregion
 
       const now = new Date();
@@ -578,7 +610,7 @@ server.post<{
     } catch (error: any) {
       console.error('Create endpoint error:', error);
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:354',message:'Create endpoint catch block ENTRY',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),errorName:error?.name,replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      safeIngest({location:'index.ts:354',message:'Create endpoint catch block ENTRY',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200),errorName:error?.name,replySent:reply.sent,replyStatusCode:reply.statusCode},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'});
       // #endregion
       logger.error('App creation failed', error, {
         inputLength: request.body.input?.length,
@@ -613,28 +645,28 @@ server.post<{
           message: errorMessage,
         };
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:380',message:'Create endpoint BEFORE reply.send',data:{statusCode,replySent:reply.sent,errorResponseBody:JSON.stringify(errorResponse)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:380',message:'Create endpoint BEFORE reply.send',data:{statusCode,replySent:reply.sent,errorResponseBody:JSON.stringify(errorResponse)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
         return reply.code(statusCode).type('application/json').send(errorResponse);
       } catch (sendError: any) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:388',message:'Create endpoint reply.send FAILED',data:{sendError:sendError?.message,sendErrorStack:sendError?.stack?.substring(0,200),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        safeIngest({location:'index.ts:388',message:'Create endpoint reply.send FAILED',data:{sendError:sendError?.message,sendErrorStack:sendError?.stack?.substring(0,200),replySent:reply.sent},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
         // #endregion
         logger.error('Failed to send create error response', sendError);
         // Try raw response as fallback
         if (!reply.sent) {
           try {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:393',message:'Create endpoint trying raw.writeHead',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+            safeIngest({location:'index.ts:393',message:'Create endpoint trying raw.writeHead',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
             // #endregion
             reply.raw.writeHead(statusCode, { 'Content-Type': 'application/json' });
             reply.raw.end(JSON.stringify({ success: false, error: 'App creation failed', message: errorMessage }));
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:396',message:'Create endpoint raw.writeHead SUCCESS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+            safeIngest({location:'index.ts:396',message:'Create endpoint raw.writeHead SUCCESS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
             // #endregion
           } catch (rawError: any) {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:399',message:'Create endpoint raw.writeHead FAILED',data:{rawError:rawError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+            safeIngest({location:'index.ts:399',message:'Create endpoint raw.writeHead FAILED',data:{rawError:rawError?.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'});
             // #endregion
             logger.error('Failed to send raw error response', rawError);
           }
@@ -1221,7 +1253,7 @@ function generatePreviewHTML(app: App): string {
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:unhandledRejection',message:'UNHANDLED PROMISE REJECTION',data:{reason:reason?.message || String(reason),reasonStack:reason?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  safeIngest({location:'index.ts:unhandledRejection',message:'UNHANDLED PROMISE REJECTION',data:{reason:reason?.message || String(reason),reasonStack:reason?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
   // #endregion
   logger.error('Unhandled promise rejection', reason);
 });
@@ -1234,7 +1266,7 @@ export function buildServer(): FastifyInstance {
 // Handle uncaught exceptions
 process.on('uncaughtException', (error: Error) => {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/68f493d6-bcff-4e1c-be37-1bcd9b225526',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:uncaughtException',message:'UNCAUGHT EXCEPTION',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  safeIngest({location:'index.ts:uncaughtException',message:'UNCAUGHT EXCEPTION',data:{errorMessage:error?.message,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'});
   // #endregion
   
   // Capture in Sentry before exiting
@@ -1277,6 +1309,7 @@ const start = async () => {
     // Register app routes (discover and create)
     await registerAppRoutes(server, {
       discoveryHandler,
+      mandatoryDiscoveryHandler,
       appGenerator,
       neoEngine,
       safetyOrchestrator,
@@ -1362,6 +1395,18 @@ const start = async () => {
     
     // Display startup information
     const accessibleUrl = config.host === '0.0.0.0' ? 'localhost' : config.host;
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🚀 Neo Backend Server Started Successfully!');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`📍 Binding: ${config.host}:${actualPort}`);
+    console.log(`🌐 Access URL: http://localhost:${actualPort}`);
+    console.log(`📝 Environment: ${config.nodeEnv}`);
+    console.log(`🤖 AI Provider: ${config.aiProvider}${config.aiProvider === 'mock' ? ' (no API key - using mock)' : ''}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    
+    // Also log via Fastify logger
     server.log.info(`🚀 Neo Backend Server`);
     server.log.info(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     server.log.info(`📍 Binding: ${config.host}:${actualPort}`);

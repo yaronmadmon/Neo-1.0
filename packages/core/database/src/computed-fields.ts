@@ -9,7 +9,7 @@ import type { ComputedFieldDef, ComputedFieldContext } from './types.js';
 // EXPRESSION PARSER & EVALUATOR
 // ============================================================
 
-type ExpressionValue = string | number | boolean | null | undefined | Record<string, unknown>;
+type ExpressionValue = string | number | boolean | null | undefined | Record<string, unknown> | ExpressionValue[];
 
 /**
  * Parse and evaluate expressions for computed fields
@@ -295,7 +295,7 @@ export class ExpressionEvaluator {
     this.functions.set('CEIL', (num) => Math.ceil(Number(num) || 0));
     this.functions.set('MIN', (...args) => Math.min(...args.map(a => Number(a) || 0)));
     this.functions.set('MAX', (...args) => Math.max(...args.map(a => Number(a) || 0)));
-    this.functions.set('SUM', (...args) => args.reduce((sum, a) => sum + (Number(a) || 0), 0));
+    this.functions.set('SUM', (...args) => args.reduce<number>((sum, a) => sum + (Number(a) || 0), 0));
     this.functions.set('AVG', (...args) => {
       const nums = args.map(a => Number(a) || 0);
       return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
@@ -351,7 +351,7 @@ export class ExpressionEvaluator {
       return arr.filter(item => 
         typeof item === 'object' && item !== null && 
         (item as Record<string, unknown>)[String(field)] === value
-      );
+      ) as ExpressionValue;
     });
     this.functions.set('MAP', (arr, field) => {
       if (!Array.isArray(arr)) return [];
@@ -359,7 +359,7 @@ export class ExpressionEvaluator {
         typeof item === 'object' && item !== null 
           ? (item as Record<string, unknown>)[String(field)]
           : item
-      );
+      ) as ExpressionValue;
     });
 
     // Currency functions

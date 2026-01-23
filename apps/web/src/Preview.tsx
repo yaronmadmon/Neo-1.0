@@ -2,7 +2,7 @@
  * Preview Page Component
  * Fetches app data and renders it using SchemaRenderer
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { SchemaRenderer } from './components/SchemaRenderer.js';
 import type { App } from './types.js';
 
@@ -46,6 +46,7 @@ export default function Preview({ id: propId }: PreviewProps) {
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ message: string; type?: 'success' | 'error' } | null>(null);
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
+  const [globalSearch, setGlobalSearch] = useState('');
 
   const navigate = (path: string) => {
     window.history.pushState({}, '', path);
@@ -377,6 +378,16 @@ export default function Preview({ id: propId }: PreviewProps) {
     }
   }, [app?.schema?.pages]);
 
+  useEffect(() => {
+    if (filteredPages.length === 0) {
+      return;
+    }
+    const hasCurrent = filteredPages.some((page) => page.id === currentPageId);
+    if (!hasCurrent) {
+      setCurrentPageId(filteredPages[0].id);
+    }
+  }, [filteredPages, currentPageId]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -406,7 +417,72 @@ export default function Preview({ id: propId }: PreviewProps) {
   }
 
   const pages = Array.isArray(app.schema?.pages) ? app.schema.pages : [];
-  const currentPage = pages.find((page) => page.id === currentPageId) || pages[0];
+  const normalizedQuery = globalSearch.trim().toLowerCase();
+
+  const valueMatchesQuery = (value: unknown, depth: number = 0): boolean => {
+    if (!normalizedQuery) return true;
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return String(value).toLowerCase().includes(normalizedQuery);
+    }
+    if (Array.isArray(value)) {
+      return value.some((entry) => valueMatchesQuery(entry, depth + 1));
+    }
+    if (typeof value === 'object' && depth < 3) {
+      return Object.values(value as Record<string, unknown>).some((entry) =>
+        valueMatchesQuery(entry, depth + 1)
+      );
+    }
+    return false;
+  };
+
+  const filterComponentsByQuery = (components: Array<any>): Array<any> => {
+    if (!normalizedQuery) return components;
+    return components
+      .map((component) => {
+        const children = Array.isArray(component.children)
+          ? filterComponentsByQuery(component.children)
+          : undefined;
+        const propsMatch = valueMatchesQuery(component.props);
+        const hasMatchingChildren = Array.isArray(children) && children.length > 0;
+        if (propsMatch || hasMatchingChildren) {
+          return { ...component, children };
+        }
+        return null;
+      })
+      .filter((component) => component !== null);
+  };
+
+  const filterDataByQuery = (data: Record<string, unknown>): Record<string, unknown> => {
+    if (!normalizedQuery) return data;
+    const filtered: Record<string, unknown> = {};
+    Object.entries(data).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        filtered[key] = value.filter((row) => valueMatchesQuery(row));
+      } else if (valueMatchesQuery(value)) {
+        filtered[key] = value;
+      }
+    });
+    return filtered;
+  };
+
+  const filteredPages = useMemo(() => {
+    if (!normalizedQuery) return pages;
+    return pages
+      .map((page) => {
+        const components = Array.isArray(page.components) ? page.components : [];
+        const filteredComponents = filterComponentsByQuery(components);
+        const pageMatches = valueMatchesQuery(page.name);
+        const hasComponents = filteredComponents.length > 0;
+        return pageMatches || hasComponents
+          ? { ...page, components: filteredComponents }
+          : null;
+      })
+      .filter((page) => page !== null);
+  }, [normalizedQuery, pages]);
+
+  const currentPage =
+    filteredPages.find((page) => page.id === currentPageId) || filteredPages[0];
   
   // Transform components to ComponentInstance format with proper typing
   const transformComponent = (comp: any): {
@@ -428,6 +504,10 @@ export default function Preview({ id: propId }: PreviewProps) {
   const componentInstances = Array.isArray(currentPage?.components)
     ? currentPage.components.map(transformComponent)
     : [];
+
+  const filteredData = useMemo(() => {
+    return filterDataByQuery((app.data || {}) as Record<string, unknown>);
+  }, [app.data, normalizedQuery]);
 
   // Debug: Log component instances
   console.log('🔧 Current page:', currentPage);
@@ -451,6 +531,21 @@ export default function Preview({ id: propId }: PreviewProps) {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <div className="hidden md:block w-64">
+              <label className="sr-only" htmlFor="preview-global-search">
+                Search app
+              </label>
+              <div className="relative">
+                <input
+                  id="preview-global-search"
+                  value={globalSearch}
+                  onChange={(e) => setGlobalSearch(e.target.value)}
+                  placeholder="Search this app"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                />
+                <span className="pointer-events-none absolute right-2 top-2 text-[10px] uppercase tracking-wide text-gray-400">Global</span>
+              </div>
+            </div>
             <button
               onClick={() => navigate(`/studio/${id}`)}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-colors font-medium text-sm"
@@ -476,7 +571,7 @@ export default function Preview({ id: propId }: PreviewProps) {
           <div className="p-4">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Pages</h2>
             <nav className="space-y-1">
-              {pages.map((page) => (
+              {filteredPages.map((page) => (
                 <button
                   key={page.id}
                   onClick={() => setCurrentPageId(page.id)}
@@ -502,12 +597,22 @@ export default function Preview({ id: propId }: PreviewProps) {
               value={currentPage?.id || ''}
               onChange={(e) => setCurrentPageId(e.target.value)}
             >
-              {pages.map((page) => (
+              {filteredPages.map((page) => (
                 <option key={page.id} value={page.id}>
                   {page.name}
                 </option>
               ))}
             </select>
+            <label className="mt-4 block text-xs font-semibold text-gray-500 uppercase tracking-wide" htmlFor="preview-global-search-mobile">
+              Global Search
+            </label>
+            <input
+              id="preview-global-search-mobile"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Search this app"
+              className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            />
           </div>
 
       {/* Notification */}
@@ -520,9 +625,9 @@ export default function Preview({ id: propId }: PreviewProps) {
       )}
 
       {/* Render the app schema */}
-          <SchemaRenderer
+            <SchemaRenderer
             components={componentInstances}
-            data={app.data || {}}
+            data={filteredData}
             theme={app.theme}
             onAction={handleComponentAction}
           />

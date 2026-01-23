@@ -54,16 +54,38 @@ function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [app, setApp] = useState<App | null>(null);
+  const [savedApps, setSavedApps] = useState<App[]>([]);
+  const [globalSearch, setGlobalSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isSpeechSupported, setIsSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   
-  // Discovery state
+  // Discovery state (mandatory flow)
   const [discoveryQuestions, setDiscoveryQuestions] = useState<DiscoveryQuestion[]>([]);
-  const [discoveredInfo, setDiscoveredInfo] = useState<Record<string, unknown> | null>(null);
+  const [discoveryState, setDiscoveryState] = useState<{ currentStep: number; context?: 'business' | 'home'; answers: Record<string, unknown> } | null>(null);
+  const [appConfig, setAppConfig] = useState<Record<string, unknown> | null>(null);
   const [isDiscoveryMode, setIsDiscoveryMode] = useState(false);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [isHomePlaceholder, setIsHomePlaceholder] = useState(false);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem('neo.savedApps');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setSavedApps(parsed as App[]);
+        }
+      } catch {
+        // Ignore invalid storage data
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('neo.savedApps', JSON.stringify(savedApps));
+  }, [savedApps]);
 
   // Initialize speech recognition on component mount
   useEffect(() => {
@@ -138,12 +160,14 @@ function App() {
     }
   };
 
-  // Discovery flow: Check if clarification is needed
-  const handleDiscovery = async (userInput: string, existingInfo?: Record<string, unknown>, answers?: Record<string, unknown>) => {
+  // Mandatory discovery flow: Always runs
+  const handleDiscovery = async (userInput: string, state?: { currentStep: number; context?: 'business' | 'home'; answers: Record<string, unknown> }, answers?: Record<string, unknown>) => {
     setDiscoveryLoading(true);
     setError(null);
+    setIsHomePlaceholder(false);
 
     try {
+      console.log('Starting discovery with input:', userInput.trim(), 'state:', state, 'answers:', answers);
       const response = await fetch('/api/apps/discover', {
         method: 'POST',
         headers: {
@@ -151,10 +175,12 @@ function App() {
         },
         body: JSON.stringify({
           input: userInput.trim(),
-          discoveredInfo: existingInfo,
+          state: state,
           answers: answers,
         }),
       });
+      
+      console.log('Discovery response status:', response.status, 'ok:', response.ok);
 
       // Get response as text first to handle empty responses
       const responseText = await response.text();
@@ -183,72 +209,115 @@ function App() {
         throw new Error(data.message || data.error || 'Discovery request failed');
       }
       
-      if (data.needsClarification && data.questions && data.questions.length > 0) {
-        // Show questions
-        setDiscoveryQuestions(data.questions);
-        setDiscoveredInfo(data.discoveredInfo || null);
+      // Handle Home placeholder
+      if (data.isHomePlaceholder) {
+        setIsHomePlaceholder(true);
+        setDiscoveryState(data.state || null);
+        setDiscoveryQuestions([]);
         setIsDiscoveryMode(true);
         setDiscoveryLoading(false);
-        return { needsMoreInfo: true, discoveredInfo: data.discoveredInfo };
-      } else {
-        // No questions needed, proceed to create
-        setDiscoveryLoading(false);
-        return { needsMoreInfo: false, discoveredInfo: data.discoveredInfo };
+        return { needsMoreInfo: true, isHomePlaceholder: true, state: data.state };
       }
+      
+      // If complete, return AppConfig
+      if (!data.needsClarification && data.appConfig) {
+        setAppConfig(data.appConfig);
+        setDiscoveryLoading(false);
+        return { needsMoreInfo: false, appConfig: data.appConfig, state: data.state || null };
+      }
+      
+      // More questions needed
+      if (data.needsClarification && data.questions && data.questions.length > 0) {
+        setDiscoveryQuestions(data.questions);
+        setDiscoveryState(data.state);
+        setIsDiscoveryMode(true);
+        setDiscoveryLoading(false);
+        return { needsMoreInfo: true, state: data.state };
+      }
+      
+      // Should not reach here, but handle gracefully
+      setDiscoveryLoading(false);
+      return { needsMoreInfo: false, appConfig: data.appConfig, state: data.state };
     } catch (err: any) {
       setDiscoveryLoading(false);
       setError(err.message || 'Discovery failed');
-      // On discovery error, proceed to create anyway
-      return { needsMoreInfo: false, discoveredInfo: null };
+      throw err; // Re-throw - discovery is mandatory
     }
   };
 
-  // Handle discovery answers
+  // Handle discovery answers (mandatory flow - no skip)
   const handleDiscoveryAnswer = async (answers: Record<string, unknown>) => {
-    if (!input.trim() || !discoveredInfo) {
-      setError('Invalid discovery state');
+    if (!input.trim()) {
+      setError('Please enter a description of the app you want to create');
       setIsDiscoveryMode(false);
       return;
     }
-
-    // Send answers and get next set of questions or proceed
-    const result = await handleDiscovery(input.trim(), discoveredInfo, answers);
     
-    if (!result.needsMoreInfo) {
-      // No more questions, create the app
+    if (!discoveryState) {
+      console.error('Discovery state is null when trying to submit answers');
+      setError('Discovery session expired. Please start over.');
       setIsDiscoveryMode(false);
-      await handleCreateApp(result.discoveredInfo || discoveredInfo);
+      setDiscoveryQuestions([]);
+      return;
     }
-    // If more questions, DiscoveryDialog will update automatically via state
+
+    try {
+      // Send answers and get next set of questions or proceed
+      const result = await handleDiscovery(input.trim(), discoveryState, answers);
+      
+      if (result.isHomePlaceholder) {
+        // Home discovery placeholder - show message, don't create app
+        setIsHomePlaceholder(true);
+        setDiscoveryState(result.state);
+        return;
+      }
+      
+      if (!result.needsMoreInfo && result.appConfig) {
+        // Discovery complete, create the app
+        setIsDiscoveryMode(false);
+        await handleCreateApp(result.appConfig);
+      }
+      // If more questions, DiscoveryDialog will update automatically via state
+    } catch (err: any) {
+      setError(err.message || 'Discovery failed');
+      setIsDiscoveryMode(false);
+    }
   };
 
-  // Handle skip discovery
-  const handleSkipDiscovery = async () => {
-    setIsDiscoveryMode(false);
-    setDiscoveryQuestions([]);
-    // Proceed to create with whatever we have
-    await handleCreateApp(discoveredInfo);
-  };
-
-  // Main create handler - checks discovery first
+  // Main create handler - MANDATORY discovery always runs first
   const handleCreate = async () => {
     if (!input.trim()) {
       setError('Please enter a description of the app you want to create');
       return;
     }
 
-    // First, check if discovery is needed
-    const discoveryResult = await handleDiscovery(input.trim());
-    
-    if (!discoveryResult.needsMoreInfo) {
-      // No questions, create directly
-      await handleCreateApp(discoveryResult.discoveredInfo || undefined);
+    // Clear any previous errors and reset discovery state
+    setError(null);
+    setDiscoveryState(null);
+    setIsDiscoveryMode(false);
+
+    try {
+      // MANDATORY: Discovery always runs first
+      const discoveryResult = await handleDiscovery(input.trim());
+      
+      if (discoveryResult.isHomePlaceholder) {
+        // Home discovery placeholder - show message
+        setIsHomePlaceholder(true);
+        return;
+      }
+      
+      if (!discoveryResult.needsMoreInfo && discoveryResult.appConfig) {
+        // Discovery complete, create app
+        await handleCreateApp(discoveryResult.appConfig);
+      }
+      // If needsMoreInfo is true, DiscoveryDialog will be shown and handleCreateApp will be called after answers
+    } catch (err: any) {
+      setError(err.message || 'Discovery failed');
     }
-    // If questions exist, DiscoveryDialog will be shown and handleCreateApp will be called after answers
   };
 
-  // Create app (with optional discovered info)
-  const handleCreateApp = async (info?: Record<string, unknown> | null) => {
+  // Create app (with AppConfig from discovery)
+  const handleCreateApp = async (appConfig?: Record<string, unknown> | null) => {
     setLoading(true);
     setError(null);
 
@@ -260,7 +329,7 @@ function App() {
         },
         body: JSON.stringify({
           input: input.trim(),
-          discoveredInfo: info,
+          appConfig: appConfig,
         }),
       });
 
@@ -351,6 +420,10 @@ function App() {
       console.log('App name:', newApp.name);
       console.log('App category:', newApp.category);
       setApp(newApp);
+      setSavedApps((prev) => {
+        const next = prev.filter((item) => item.id !== newApp.id);
+        return [newApp, ...next];
+      });
       setInput('');
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
@@ -360,28 +433,52 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50">
-      {/* Discovery Dialog */}
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#f5f3ff,transparent_50%),radial-gradient(circle_at_top_right,#e0f2fe,transparent_45%),linear-gradient(180deg,#ffffff,rgba(238,242,255,0.7))]">
+      {/* Discovery Dialog - Mandatory (no skip) */}
       {isDiscoveryMode && (
-        <DiscoveryDialog
-          questions={discoveryQuestions}
-          onAnswer={handleDiscoveryAnswer}
-          onSkip={handleSkipDiscovery}
-          onCancel={() => {
-            setIsDiscoveryMode(false);
-            setDiscoveryQuestions([]);
-            setDiscoveredInfo(null);
-          }}
-          isLoading={discoveryLoading || loading}
-        />
+        <>
+          {isHomePlaceholder ? (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Home Discovery Coming Next</h2>
+                <p className="text-gray-600 mb-6">
+                  Home discovery questions are currently being developed. Please check back soon!
+                </p>
+                <button
+                  onClick={() => {
+                    setIsDiscoveryMode(false);
+                    setIsHomePlaceholder(false);
+                    setDiscoveryState(null);
+                    setDiscoveryQuestions([]);
+                  }}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : (
+            <DiscoveryDialog
+              questions={discoveryQuestions}
+              onAnswer={handleDiscoveryAnswer}
+              onCancel={() => {
+                setIsDiscoveryMode(false);
+                setDiscoveryQuestions([]);
+                setDiscoveryState(null);
+                setAppConfig(null);
+              }}
+              isLoading={discoveryLoading || loading}
+            />
+          )}
+        </>
       )}
 
-      <div className="container mx-auto px-4 py-16 max-w-4xl">
+      <div className="container mx-auto px-4 py-16 max-w-5xl">
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+          <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-gray-900 mb-4">
             Neo
           </h1>
-          <p className="text-xl text-gray-600 mb-2">
+          <p className="text-xl md:text-2xl text-gray-700 mb-2">
             Create fully functional apps in seconds with AI
           </p>
           <p className="text-gray-500">
@@ -389,7 +486,7 @@ function App() {
           </p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+        <div className="bg-white/80 backdrop-blur rounded-2xl shadow-[0_20px_60px_-25px_rgba(79,70,229,0.45)] border border-white/60 p-8 mb-10">
           <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
               <label
@@ -406,7 +503,7 @@ function App() {
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
                     isListening
                       ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
-                      : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                      : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                   title={isListening ? 'Stop listening' : 'Start voice input'}
                 >
@@ -450,7 +547,7 @@ function App() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="e.g., A habit tracker app to track my daily routines and build better habits... Or click the microphone button to speak!"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none bg-white"
                 rows={6}
                 disabled={loading || isListening}
               />
@@ -463,7 +560,7 @@ function App() {
             </div>
             {!isSpeechSupported && (
               <p className="mt-2 text-xs text-gray-500">
-                💡 Voice input is available in Chrome, Edge, and Safari. Type your request above or use a supported browser.
+                Voice input is available in Chrome, Edge, and Safari. Type your request above or use a supported browser.
               </p>
             )}
           </div>
@@ -477,16 +574,16 @@ function App() {
           <button
             onClick={handleCreate}
             disabled={loading || !input.trim()}
-            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 text-white font-semibold py-3 px-6 rounded-xl hover:from-indigo-700 hover:via-blue-700 hover:to-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-indigo-200"
           >
             {loading ? 'Creating your app...' : 'Create App'}
           </button>
         </div>
 
         {app && (
-          <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="bg-white rounded-2xl shadow-xl p-8 mb-10">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">
-              ✨ Your app is ready!
+              Your app is ready!
             </h2>
             <div className="space-y-4">
               <div>
@@ -507,7 +604,7 @@ function App() {
                 <div className="pt-4 flex gap-4">
                   <a
                     href={app.previewUrl || `/preview/${app.id}`}
-                    className="inline-block bg-purple-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-purple-700 transition-colors"
+                    className="inline-block bg-indigo-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-indigo-700 transition-colors"
                     onClick={(e) => {
                       e.preventDefault();
                       window.history.pushState({}, '', app.previewUrl || `/preview/${app.id}`);
@@ -518,7 +615,7 @@ function App() {
                   </a>
                   <a
                     href={`/studio/${app.id}`}
-                    className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold py-2 px-6 rounded-lg hover:from-purple-700 hover:to-blue-700 transition-colors"
+                    className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold py-2 px-6 rounded-lg hover:from-indigo-700 hover:to-blue-700 transition-colors"
                     onClick={(e) => {
                       e.preventDefault();
                       window.history.pushState({}, '', `/studio/${app.id}`);
@@ -536,6 +633,83 @@ function App() {
                   Error: App ID is missing. Please try creating the app again.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {savedApps.length > 0 && (
+          <div className="bg-white/80 backdrop-blur rounded-2xl border border-white/60 shadow-[0_16px_45px_-30px_rgba(15,23,42,0.5)] p-8 mb-10">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Your apps</h2>
+                <p className="text-sm text-gray-500">{savedApps.length} saved</p>
+              </div>
+              <div className="w-full md:w-80">
+                <label className="sr-only" htmlFor="global-search">
+                  Search apps
+                </label>
+                <div className="relative">
+                  <input
+                    id="global-search"
+                    value={globalSearch}
+                    onChange={(e) => setGlobalSearch(e.target.value)}
+                    placeholder="Search your apps"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-2.5 text-xs text-gray-400">Global</span>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {savedApps
+                .filter((saved) => {
+                  const q = globalSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const name = saved.name?.toLowerCase() || '';
+                  const desc = saved.description?.toLowerCase() || '';
+                  const category = saved.category?.toLowerCase() || '';
+                  return name.includes(q) || desc.includes(q) || category.includes(q);
+                })
+                .map((saved) => (
+                <div key={saved.id} className="group rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">{saved.name}</h3>
+                      {saved.description && (
+                        <p className="mt-1 text-sm text-gray-600 line-clamp-2">{saved.description}</p>
+                      )}
+                      <p className="mt-2 text-xs uppercase tracking-wide text-gray-500">{saved.category}</p>
+                    </div>
+                    <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
+                      Ready
+                    </span>
+                  </div>
+                  <div className="mt-4 flex gap-3">
+                    <a
+                      href={saved.previewUrl || `/preview/${saved.id}`}
+                      className="inline-flex items-center justify-center rounded-lg border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50 transition-colors"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.history.pushState({}, '', saved.previewUrl || `/preview/${saved.id}`);
+                        window.dispatchEvent(new CustomEvent('navigate', { detail: { path: saved.previewUrl || `/preview/${saved.id}` } }));
+                      }}
+                    >
+                      Preview
+                    </a>
+                    <a
+                      href={`/studio/${saved.id}`}
+                      className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.history.pushState({}, '', `/studio/${saved.id}`);
+                        window.dispatchEvent(new CustomEvent('navigate', { detail: { path: `/studio/${saved.id}` } }));
+                      }}
+                    >
+                      Open Studio
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
