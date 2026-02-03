@@ -26,6 +26,7 @@ export {
   type MaterializedComponent,
   type MaterializedPage,
   type MaterializedApp,
+  type MaterializationContext,
 } from './page-materializer.js';
 
 // Workflow Engine (Phase 3)
@@ -145,6 +146,7 @@ export { WorkflowEngine as BlueprintWorkflowEngine } from './lib/workflows/Workf
 export { DataModelGenerator } from './lib/data/DataModelGenerator.js';
 export { LayoutEngine } from './lib/ui/LayoutEngine.js';
 export { listIndustryKits, getIndustryKit } from './kits/industries/index.js';
+export type { IndustryKit, IndustryKitId, IndustryEntitySpec, IndustryFieldSpec } from './kits/industries/types.js';
 export { listBehaviorBundleSpecs, getBehaviorBundleSpec } from './behaviors/index.js';
 
 // ============================================================
@@ -218,6 +220,63 @@ export {
 } from './dna/index.js';
 
 // ============================================================
+// MERGER SYSTEM (AI Pipeline Integration)
+// ============================================================
+// Merges industry kits with AI customizations and validates for Studio
+export {
+  AppMerger,
+  createAppMerger,
+  type BuildExplanation,
+  type MergeResult,
+} from './merger/app-merger.js';
+
+export {
+  StudioValidator,
+  createStudioValidator,
+  validateForStudio,
+  type ValidationIssue as MergerValidationIssue,
+  type ValidationResult as MergerValidationResult,
+  type ValidationOptions,
+} from './merger/studio-validator.js';
+
+// ============================================================
+// APP CONFIGURATION (Kit + Configuration Layer)
+// ============================================================
+// Controls how kits are presented without modifying the kits themselves
+// Key concepts: Terminology, Feature Visibility, Defaults, Sample Data
+export {
+  // Types
+  type FeatureVisibility,
+  type ComplexityLevel,
+  type PrimaryView,
+  type LocationStyle,
+  type EntityTerminology,
+  type FeatureVisibilityConfig,
+  type ViewDefaults,
+  type SampleDataContext,
+  type DiscoveryContext,
+  type ConfigurationAssumptions,
+  type AppConfiguration,
+  type PartialAppConfiguration,
+  type KitDefaultConfiguration,
+  type DiscoveryOutput,
+  type SampleRecord,
+  type GeneratedSampleData,
+  // Kit defaults
+  getKitDefaults,
+  getKitsWithDefaults,
+  hasKitDefaults,
+  // Configuration builder
+  buildConfiguration,
+  mergeConfiguration,
+  createMinimalConfiguration,
+  // Sample data generator
+  generateSampleData,
+  generateWelcomeMessage,
+  generateSetupSummary,
+} from './app-configuration/index.js';
+
+// ============================================================
 // UNIFIED API
 // ============================================================
 
@@ -229,6 +288,9 @@ import { DataModelGenerator } from './lib/data/DataModelGenerator.js';
 import { VoiceEditor } from './voice-editor.js';
 import { NeoIntelligence } from './intelligence/index.js';
 import { NeoBlueprintEngine } from './dna/neo-blueprint-engine.js';
+import { AppMerger, type BuildExplanation, type MergeResult } from './merger/app-merger.js';
+import { StudioValidator, type ValidationResult as StudioValidationResult } from './merger/studio-validator.js';
+import { getIndustryKit } from './kits/industries/index.js';
 import type { AppBlueprint, ProcessedIntent } from './types.js';
 import type { MaterializedApp } from './page-materializer.js';
 import type { GeneratedData } from './data-generator.js';
@@ -245,6 +307,20 @@ export interface GeneratedAppResult {
 }
 
 /**
+ * AI Pipeline generation result with explanation
+ */
+export interface AIPipelineResult extends GeneratedAppResult {
+  /** Build explanation documenting what was built and why */
+  explanation: BuildExplanation;
+  /** Studio validation result */
+  validation: StudioValidationResult;
+  /** Industry kit that was used */
+  kitUsed: string;
+  /** Whether the pipeline used the full AI flow or fell back */
+  usedAIPipeline: boolean;
+}
+
+/**
  * Main unified API for app generation
  */
 export class NeoEngine {
@@ -256,6 +332,8 @@ export class NeoEngine {
   private dataModelGenerator: DataModelGenerator;
   private voiceEditor: VoiceEditor;
   private intelligence: NeoIntelligence;
+  private appMerger: AppMerger;
+  private studioValidator: StudioValidator;
 
   constructor() {
     this.blueprintEngine = new BlueprintEngine();
@@ -266,6 +344,8 @@ export class NeoEngine {
     this.dataModelGenerator = new DataModelGenerator();
     this.voiceEditor = new VoiceEditor();
     this.intelligence = new NeoIntelligence();
+    this.appMerger = new AppMerger();
+    this.studioValidator = new StudioValidator({ autoFix: true });
   }
 
   /**
@@ -287,8 +367,19 @@ export class NeoEngine {
     // Step 1: Generate blueprint
     const blueprint = this.appBlueprintEngine.generate(intent);
 
-    // Step 2: Materialize into renderable format
-    const materializedApp = this.pageMaterializer.materialize(blueprint);
+    // Extract industry context from intent for visual blocks
+    const discoveredInfo = intent.discoveredInfo as {
+      industry?: string;
+      primaryIntent?: 'operations' | 'customer-facing' | 'internal' | 'hybrid';
+      context?: Record<string, unknown>;
+      features?: string[];
+    } | undefined;
+
+    // Build materialization context with industry info
+    const materializationContext = this.buildMaterializationContext(discoveredInfo);
+
+    // Step 2: Materialize into renderable format with context
+    const materializedApp = this.pageMaterializer.materialize(blueprint, materializationContext);
 
     // Step 3: Generate sample data
     const sampleData = this.dataModelGenerator.generate(blueprint);
@@ -298,6 +389,154 @@ export class NeoEngine {
       materializedApp,
       sampleData,
     };
+  }
+
+  /**
+   * Build materialization context from discovered info
+   * NOW INCLUDES KIT'S DASHBOARD TEMPLATE for industry-specific layouts
+   */
+  private buildMaterializationContext(discoveredInfo?: {
+    industry?: string;
+    primaryIntent?: 'operations' | 'customer-facing' | 'internal' | 'hybrid';
+    features?: string[];
+  }): import('./page-materializer.js').MaterializationContext {
+    if (!discoveredInfo?.industry) {
+      return {};
+    }
+
+    // Get the industry kit to access its dashboard template
+    const kit = getIndustryKit(discoveredInfo.industry as any);
+
+    // Map industry to dashboard type (use kit's dashboardType if available)
+    const industryToDashboardType: Record<string, 'operations' | 'sales' | 'service' | 'health'> = {
+      'gym': 'health',
+      'fitness-coach': 'health',
+      'medical': 'health',
+      'home-health': 'health',
+      'salon': 'service',
+      'spa': 'service',
+      'plumber': 'service',
+      'electrician': 'service',
+      'contractor': 'service',
+      'tutor': 'service',
+      'cleaning': 'service',
+      'commercial-cleaning': 'service',
+      'ecommerce': 'sales',
+      'retail': 'sales',
+      'real-estate': 'sales',
+      'property-management': 'operations',
+      'restaurant': 'operations',
+      'cafe': 'operations',
+      'bakery': 'operations',
+    };
+
+    const dashboardType = kit.dashboardType || industryToDashboardType[discoveredInfo.industry] || 'operations';
+
+    return {
+      industry: {
+        id: discoveredInfo.industry,
+        name: kit.name || discoveredInfo.industry.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        dashboardType,
+      },
+      features: discoveredInfo.features || [],
+      // Pass kit's dashboard template for industry-specific KPIs, charts, and lists
+      dashboardTemplate: kit.dashboardTemplate,
+      // Pass kit's terminology for proper entity naming
+      terminology: kit.terminology,
+    };
+  }
+
+  /**
+   * Generate app using the AI Pipeline (2-call system)
+   * This uses industry kits + AI customizations for intelligent app building
+   * 
+   * @param intent - Processed intent with discoveredInfo from AI Understanding
+   * @returns AIPipelineResult with blueprint, explanation, and validation
+   */
+  async generateAppWithAIPipeline(intent: ProcessedIntent): Promise<AIPipelineResult> {
+    // Extract discovered info from intent
+    const discoveredInfo = intent.discoveredInfo as {
+      industry?: string;
+      primaryIntent?: 'operations' | 'customer-facing' | 'internal' | 'hybrid';
+      context?: Record<string, unknown>;
+      teamSize?: string;
+    } | undefined;
+
+    // Determine industry and primary intent
+    const industryId = discoveredInfo?.industry || 
+      intent.extractedDetails?.category || 
+      'general_business';
+    
+    const primaryIntent = discoveredInfo?.primaryIntent || 'operations';
+
+    // Get the industry kit
+    const kit = getIndustryKit(industryId as any);
+
+    // Build understanding result for merger
+    const understanding = {
+      industry: kit.id,
+      primaryIntent: primaryIntent as 'operations' | 'customer-facing' | 'internal' | 'hybrid',
+      confidence: 0.85, // Default confidence for discovered info
+      context: {
+        teamSize: discoveredInfo?.teamSize as 'solo' | 'small' | 'medium' | 'large' | undefined,
+        features: intent.extractedDetails?.features || [],
+        preferences: [],
+      },
+      suggestedQuestions: [],
+    };
+
+    // Use the merger to combine kit with any customizations
+    // Note: For now, we pass null for customizations since the AI customization
+    // service would need to be called separately (requires AIProvider)
+    const mergeResult = this.appMerger.merge(
+      kit,
+      null, // Customizations would come from AICustomizationService
+      understanding,
+      intent.rawInput
+    );
+
+    // Validate the blueprint for Studio compatibility
+    const validation = this.studioValidator.validate(mergeResult.blueprint);
+
+    // Use the validated/fixed blueprint if auto-fix was applied
+    const finalBlueprint = validation.blueprint || mergeResult.blueprint;
+
+    // Build materialization context with industry info
+    const materializationContext = this.buildMaterializationContext({
+      industry: discoveredInfo?.industry,
+      primaryIntent: discoveredInfo?.primaryIntent,
+      features: intent.extractedDetails?.features,
+    });
+
+    // Materialize into renderable format with context
+    const materializedApp = this.pageMaterializer.materialize(finalBlueprint, materializationContext);
+
+    // Generate sample data
+    const sampleData = this.dataModelGenerator.generate(finalBlueprint);
+
+    return {
+      blueprint: finalBlueprint,
+      materializedApp,
+      sampleData,
+      explanation: mergeResult.explanation,
+      validation,
+      kitUsed: kit.id,
+      usedAIPipeline: true,
+    };
+  }
+
+  /**
+   * Get the app merger for direct access
+   */
+  getAppMerger(): AppMerger {
+    return this.appMerger;
+  }
+
+  /**
+   * Get the studio validator for direct access
+   */
+  getStudioValidator(): StudioValidator {
+    return this.studioValidator;
   }
 
   /**
@@ -428,8 +667,14 @@ export class NeoEngine {
     // (Future: PageMaterializer will be updated to use UnifiedAppSchema directly)
     const legacyBlueprint = this.convertToLegacyBlueprint(blueprintResult.schema);
     
-    // Step 4: Materialize into renderable format
-    const materializedApp = this.pageMaterializer.materialize(legacyBlueprint);
+    // Build materialization context from understanding
+    const materializationContext = this.buildMaterializationContext({
+      industry: understanding.industry?.id,
+      features: understanding.features?.map(f => f.id) || [],
+    });
+    
+    // Step 4: Materialize into renderable format with context
+    const materializedApp = this.pageMaterializer.materialize(legacyBlueprint, materializationContext);
     
     return {
       ...blueprintResult,

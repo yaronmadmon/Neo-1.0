@@ -30,12 +30,11 @@ const StatCard: React.FC<{ icon: string; label: string; value: number | string; 
   icon,
   label,
   value,
-  color = 'purple',
 }) => (
-  <div className={`bg-${color}-50 rounded-lg p-3 text-center`}>
+  <div className="bg-muted rounded-lg p-3 text-center">
     <span className="text-2xl">{icon}</span>
-    <div className="text-2xl font-bold text-gray-900 mt-1">{value}</div>
-    <div className="text-xs text-gray-600">{label}</div>
+    <div className="text-2xl font-bold text-foreground mt-1">{value}</div>
+    <div className="text-xs text-muted-foreground">{label}</div>
   </div>
 );
 
@@ -84,7 +83,7 @@ export const AppInspector: React.FC<AppInspectorProps> = ({ app }) => {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {/* App Header */}
-        <div className="p-4 bg-gradient-to-r from-purple-500 to-blue-500 text-white">
+        <div className="p-4 bg-primary text-primary-foreground">
           <h3 className="text-2xl font-bold">{app.name}</h3>
           {app.description && (
             <p className="text-white/80 mt-1 text-sm">{app.description}</p>
@@ -101,7 +100,7 @@ export const AppInspector: React.FC<AppInspectorProps> = ({ app }) => {
             Statistics
           </h4>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-purple-50 rounded-lg p-3 text-center">
+            <div className="bg-muted rounded-lg p-3 text-center">
               <span className="text-2xl">📄</span>
               <div className="text-2xl font-bold text-gray-900 mt-1">{pageCount}</div>
               <div className="text-xs text-gray-600">Pages</div>

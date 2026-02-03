@@ -106,8 +106,8 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
                   type="text"
                   value={(answers[question.id] as string) || ''}
                   onChange={(e) => handleChange(question.id, e.target.value)}
-                  className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
-                    errors[question.id] ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-4 py-2 border rounded-md focus-visible:ring-2 focus-visible:ring-ring ${
+                    errors[question.id] ? 'border-destructive' : 'border-input'
                   }`}
                   placeholder="Type your answer..."
                 />
@@ -121,9 +121,9 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
                       name={question.id}
                       checked={answers[question.id] === true}
                       onChange={() => handleChange(question.id, true)}
-                      className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                      className="w-4 h-4 text-primary focus-visible:ring-ring"
                     />
-                    <span className="ml-2 text-gray-700">Yes</span>
+                    <span className="ml-2 text-foreground">Yes</span>
                   </label>
                   <label className="flex items-center cursor-pointer">
                     <input
@@ -131,9 +131,9 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
                       name={question.id}
                       checked={answers[question.id] === false}
                       onChange={() => handleChange(question.id, false)}
-                      className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                      className="w-4 h-4 text-primary focus-visible:ring-ring"
                     />
-                    <span className="ml-2 text-gray-700">No</span>
+                    <span className="ml-2 text-foreground">No</span>
                   </label>
                 </div>
               )}
@@ -141,16 +141,16 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
               {question.type === 'choice' && question.options && (
                 <div className="space-y-2">
                   {question.options.map((option) => (
-                    <label key={option} className="flex items-center cursor-pointer p-3 border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-purple-300 transition-colors">
+                    <label key={option} className="flex items-center cursor-pointer p-3 border border-border rounded-md hover:bg-accent transition-colors">
                       <input
                         type="radio"
                         name={question.id}
                         value={option}
                         checked={answers[question.id] === option}
                         onChange={() => handleChange(question.id, option)}
-                        className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                        className="w-4 h-4 text-primary focus-visible:ring-ring"
                       />
-                      <span className="ml-3 text-gray-700">{option}</span>
+                      <span className="ml-3 text-foreground">{option}</span>
                     </label>
                   ))}
                 </div>
@@ -161,8 +161,8 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
                   type="number"
                   value={(answers[question.id] as number) || ''}
                   onChange={(e) => handleChange(question.id, parseInt(e.target.value, 10))}
-                  className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
-                    errors[question.id] ? 'border-red-500' : 'border-gray-300'
+                  className={`w-full px-4 py-2 border rounded-md focus-visible:ring-2 focus-visible:ring-ring ${
+                    errors[question.id] ? 'border-destructive' : 'border-input'
                   }`}
                   placeholder="Enter a number..."
                 />
@@ -191,7 +191,7 @@ export const DiscoveryDialog: React.FC<DiscoveryDialogProps> = ({
           <button
             onClick={handleSubmit}
             disabled={isLoading}
-            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
           >
             {isLoading ? 'Processing...' : 'Continue'}
           </button>

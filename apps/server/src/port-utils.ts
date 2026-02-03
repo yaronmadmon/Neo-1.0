@@ -15,11 +15,21 @@ export interface PortInfo {
  */
 export function isPortInUse(port: number): boolean {
   try {
+    // Use more specific pattern to avoid matching IPv6 addresses
+    // Look for LISTENING state on local address with exact port
     const result = execSync(
-      `netstat -ano | findstr :${port}`,
+      `netstat -ano | findstr ":${port} " | findstr "LISTENING"`,
       { encoding: 'utf-8', stdio: 'pipe' }
     );
-    return result.trim().length > 0;
+    // Additional check: make sure it's a local port (0.0.0.0 or 127.0.0.1 or [::])
+    const lines = result.trim().split('\n').filter(line => {
+      const trimmedLine = line.trim();
+      return trimmedLine.includes(`0.0.0.0:${port}`) || 
+             trimmedLine.includes(`127.0.0.1:${port}`) ||
+             trimmedLine.includes(`[::]:${port}`) ||
+             trimmedLine.includes(`[::1]:${port}`);
+    });
+    return lines.length > 0;
   } catch {
     return false;
   }

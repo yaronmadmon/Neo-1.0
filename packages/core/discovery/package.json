@@ -16,7 +16,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@neo/contracts": "*"
+    "@neo/contracts": "*",
+    "@neo/blueprint-engine": "*",
+    "@neo/ai-engine": "*"
   },
   "devDependencies": {
     "typescript": "^5.4.5"

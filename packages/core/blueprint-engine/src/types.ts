@@ -172,6 +172,8 @@ export const PageTypeEnum = z.enum([
   'timeline',
   'map',
   'chart',
+  'chat',
+  'messaging',
   'custom',
 ]);
 

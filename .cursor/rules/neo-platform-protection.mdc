@@ -1,0 +1,53 @@
+---
+description: Protect Neo platform UI - only edit user-created apps, not core platform
+alwaysApply: true
+---
+
+# Neo Platform Protection
+
+When working on this project, distinguish between:
+
+## Protected Files (DO NOT EDIT for styling/UI changes)
+
+These are the Neo **platform** files - the app builder itself:
+
+- `apps/web/src/App.tsx` - Landing page
+- `apps/web/src/index.css` - Global styles
+- `apps/web/src/main.tsx` - App entry point
+- `apps/web/src/studio/` - Studio interface
+- `apps/web/src/components/ui/` - Core UI components (shadcn)
+- `apps/web/src/components/AuthModal.tsx` - Auth UI
+- `apps/web/src/components/SettingsModal.tsx` - Settings UI
+- `apps/web/src/components/ChatDiscovery.tsx` - Discovery UI
+
+## Frontend - Modifiable with Care
+
+These handle **generated apps** and can be modified for bug fixes or new features:
+
+- `apps/web/src/Preview.tsx` - Renders user's created apps
+- `apps/web/src/components/SchemaRenderer.tsx` - Renders app schemas
+- `apps/web/src/components/ComponentRegistry.tsx` - Dynamic components
+- `packages/` - Core engine packages (app generation logic)
+
+## Backend - Safety Levels
+
+| Area | Risk | Guideline |
+|------|------|-----------|
+| New files/endpoints | Low | Adding new features is generally safe |
+| Bug fixes | Low | OK, but explain what's changing |
+| `repositories/`, `services/` | Medium | OK for fixes, test after |
+| `*-routes.ts` (existing endpoints) | Medium | Modifying can break frontend - explain changes |
+| `index.ts` | High | Core server setup - avoid unless necessary |
+| `config.ts` | High | Ask first - affects entire server |
+
+## Rules
+
+When asked to change styling, colors, or UI:
+1. **ASK** if the change is for the Neo platform or a user-created app
+2. **NEVER** modify landing page, Studio UI, or core component styles unless explicitly requested
+
+When modifying backend code:
+3. **NEVER** modify existing API endpoints without explaining what will change
+4. **NEW features** (new endpoints, new files) are generally safe
+5. **Bug fixes** are OK, but explain what's being changed
+6. **TEST** after making backend changes - verify the server still starts

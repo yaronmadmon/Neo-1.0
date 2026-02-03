@@ -1,9 +1,74 @@
 /**
- * Component Registry - FIXED VERSION
+ * Component Registry - ENHANCED VERSION
  * Maps componentId strings from schema to actual React components
- * Now handles both props.text and children
+ * Now includes shadcn blocks and new UI components
  */
 import React from 'react';
+import { Button } from './Button';
+import { Input } from './Input';
+import { Card } from './Card';
+import { Modal } from './Modal';
+import { Badge } from './Badge';
+import { Divider } from './Divider';
+import { Textarea } from './Textarea';
+import { Select } from './Select';
+import { Checkbox } from './Checkbox';
+import { Switch } from './Switch';
+import { PersonCard } from './PersonCard';
+import { ItemCard } from './ItemCard';
+
+// New shadcn-based components
+import { StatsCard, StatsCardGrid } from './StatsCard';
+import { AreaChartCard } from './AreaChartCard';
+import { SimpleDataTable, type ColumnDef } from './SimpleDataTable';
+import { LoginForm } from './login-form';
+
+// Shadcn UI primitives
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
+import { Calendar } from './ui/calendar';
+import { Progress } from './ui/progress';
+import { Slider } from './ui/slider';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from './ui/pagination';
+
+// Lucide icons for dynamic icon mapping
+import {
+  Users,
+  DollarSign,
+  BarChart3,
+  Calendar as CalendarIcon,
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  ShoppingCart,
+  Package,
+  Mail,
+  Bell,
+  Heart,
+  Star,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  FileText,
+  Folder,
+  Settings,
+  Home,
+  type LucideIcon,
+} from 'lucide-react';
+
+// Layout components
+import { SingleColumn } from './layouts/SingleColumn';
+import { TwoColumn } from './layouts/TwoColumn';
+import { ThreeColumn } from './layouts/ThreeColumn';
+import { SidebarLayout, SidebarLeft, SidebarRight } from './layouts/SidebarLayout';
+import { DashboardGrid, DashboardGridItem } from './layouts/DashboardGrid';
 
 export interface ComponentProps {
   id?: string;
@@ -41,78 +106,11 @@ const TextComponent: React.FC<ComponentProps> = ({
   );      
 };
 
-// Button Component
-const ButtonComponent: React.FC<ComponentProps> = ({
-  label,
-  children,
-  onClick,
-  variant = 'primary',
-  disabled = false,
-  ...otherProps
-}) => {
-  const baseClasses = 'px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
-  const variantStr = String(variant || 'primary');
-  const variantClasses = variantStr === 'primary'
-    ? 'bg-purple-600 text-white hover:bg-purple-700'
-    : 'bg-gray-200 text-gray-800 hover:bg-gray-300';
+// Button Component - using shadcn wrapper
+const ButtonComponent = Button;
 
-  const { id, style, ...restProps } = otherProps;
-  
-  // Use children if label not provided
-  const buttonText = label || children || 'Button';
-
-  return (
-    <button
-      className={`${baseClasses} ${variantClasses}`}
-      onClick={onClick as React.MouseEventHandler<HTMLButtonElement>}
-      disabled={Boolean(disabled)}
-      style={style as React.CSSProperties}
-      {...restProps}
-    >
-      {String(buttonText)}
-    </button>
-  );
-};
-
-// Input Component
-const InputComponent: React.FC<ComponentProps> = ({
-  label,
-  placeholder,
-  value,
-  onChange,
-  required = false,
-  type = 'text',
-  name,
-  ...otherProps
-}) => {
-  const { id, style, ...restProps } = otherProps;
-  
-  // Use name prop if provided, otherwise fall back to id or generate from label
-  const inputName = String(name || id || (label ? String(label).toLowerCase().replace(/\s+/g, '_') : ''));
-  
-  console.log('🔤 InputComponent render:', { id, name, inputName, label });
-
-  return (
-    <div className="mb-4">
-      {label != null && String(label) && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {String(label)} {Boolean(required) && <span className="text-red-500">*</span>}
-        </label>
-      )}
-      <input
-        name={inputName}
-        type={String(type || 'text') as React.HTMLInputTypeAttribute}
-        defaultValue={value != null ? String(value) : undefined}
-        onChange={onChange as React.ChangeEventHandler<HTMLInputElement>}
-        placeholder={String(placeholder || '')}
-        required={Boolean(required)}
-        className="w-full px-4 py-2 border border-solid border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"   
-        style={style as React.CSSProperties}
-        {...restProps}
-      />
-    </div>
-  );
-};
+// Input Component - using shadcn wrapper
+const InputComponent = Input;
 
 // List Component - ENHANCED
 const ListComponent: React.FC<ComponentProps> = ({
@@ -120,11 +118,18 @@ const ListComponent: React.FC<ComponentProps> = ({
   data,
   renderItem,
   children,
+  cardType,
+  cardConfig,
+  entityName,
+  compact,
+  limit,
   ...otherProps
 }) => {
   console.log('📋 ListComponent received:', {
     source,
     data,
+    cardType,
+    cardConfig,
     dataType: typeof data,
     dataKeys: data && typeof data === 'object' ? Object.keys(data) : 'no data',
     dataContent: data
@@ -141,13 +146,36 @@ const ListComponent: React.FC<ComponentProps> = ({
     items = Array.isArray(sourceData) ? sourceData : [];
   }
 
-  // FIX: If no source specified, look for 'item' or 'items' key
-  if (items.length === 0 && dataObj) {
-    const possibleKeys = ['item', 'items', 'data', Object.keys(dataObj)[0]];
+  // If no data found for source, try related key names (but NOT unrelated entities)
+  if (items.length === 0 && dataObj && sourceStr) {
+    // Try variations of the source name (singular/plural, common aliases)
+    const sourceLower = sourceStr.toLowerCase();
+    const possibleKeys = [
+      sourceStr,
+      `${sourceStr}s`,  // Add 's' for plural
+      sourceStr.replace(/s$/, ''),  // Remove 's' for singular
+      // Common entity aliases
+      ...(sourceLower === 'inventory' ? ['material', 'materials', 'product', 'products', 'item', 'items'] : []),
+      ...(sourceLower === 'material' || sourceLower === 'materials' ? ['inventory', 'product', 'products'] : []),
+      ...(sourceLower === 'product' || sourceLower === 'products' ? ['inventory', 'material', 'materials', 'item', 'items'] : []),
+    ];
+    
     for (const key of possibleKeys) {
+      if (key && dataObj[key] && Array.isArray(dataObj[key])) {
+        items = dataObj[key] as unknown[];
+        console.log(`📋 Found data via alias: "${key}" for source "${sourceStr}"`);
+        break;
+      }
+    }
+  }
+  
+  // Last resort for truly generic lists without a source - but ONLY for generic names
+  if (items.length === 0 && dataObj && (!sourceStr || sourceStr === 'item' || sourceStr === 'items')) {
+    const genericKeys = ['item', 'items', 'data'];
+    for (const key of genericKeys) {
       if (key && Array.isArray(dataObj[key])) {
         items = dataObj[key] as unknown[];
-        console.log(`📋 Auto-detected data source: "${key}"`);
+        console.log(`📋 Using generic data source: "${key}"`);
         break;
       }
     }
@@ -157,9 +185,37 @@ const ListComponent: React.FC<ComponentProps> = ({
     sourceStr,
     itemsCount: items.length,
     items: items.slice(0, 3),
+    cardType,
   });
 
   const { id, style, ...restProps } = otherProps;
+  const config = cardConfig as Record<string, any> | undefined;
+
+  // Helper to dispatch card actions
+  // NOTE: This dispatches events that Preview/Studio components listen to
+  // It does NOT navigate away from the current preview - internal navigation only
+  const dispatchCardAction = (actionType: string, itemId: string, entityId?: string) => {
+    const entity = entityId || sourceStr;
+    
+    // Dispatch event for Preview/Studio to handle internally
+    const event = new CustomEvent('neo-card-action', {
+      detail: {
+        action: actionType,
+        itemId,
+        entityId: entity,
+        source: 'card',
+        // Include target page info for internal navigation
+        targetPage: actionType.toLowerCase() === 'view' || actionType.toLowerCase() === 'edit'
+          ? `${entity}-detail`
+          : undefined,
+        targetPageParams: { id: itemId },
+      },
+      bubbles: true,
+    });
+    window.dispatchEvent(event);
+    
+    console.log(`🎯 Card action: ${actionType} on ${itemId} (entity: ${entity})`);
+  };
 
   if (items.length === 0) {
     return (
@@ -170,44 +226,391 @@ const ListComponent: React.FC<ComponentProps> = ({
     );
   }
 
-  return (
-    <div className="space-y-3" style={style as React.CSSProperties} {...restProps}>
-      {items.map((item: any, index: number) => (
-        <div key={item?.id || index} className="p-4 bg-white border border-solid border-gray-200 rounded-lg hover:shadow-md transition-shadow">
-          {renderItem && typeof renderItem === 'function' ? (
-            renderItem(item) as React.ReactNode
-          ) : (
-            <div className="space-y-1">
-              {/* Display all fields of the item */}
-              {Object.entries(item || {}).map(([key, value]) => {
-                // Skip rendering functions or complex objects
-                if (typeof value === 'function' || (typeof value === 'object' && value !== null)) {
-                  return null;
-                }
-                
-                // Style the key-value pairs
-                const isId = key.toLowerCase().includes('id');
-                const isDate = key.toLowerCase().includes('date') || key.toLowerCase().includes('at');
-                const isName = key.toLowerCase().includes('name') || key.toLowerCase().includes('title');
-                
-                return (
-                  <div key={key} className="flex">
-                    <span className={`font-medium mr-2 text-gray-600 ${isId ? 'text-xs' : ''}`}>
-                      {key}:
-                    </span>
-                    <span className={`${isName ? 'font-semibold text-gray-900' : 'text-gray-700'} ${isDate ? 'text-xs text-gray-500' : ''}`}>
-                      {isDate && value ? new Date(String(value)).toLocaleDateString() : String(value)}
-                    </span>
-                  </div>
-                );
-              })}
+  // Helper to get field value from item
+  const getFieldValue = (item: any, fieldId: string) => {
+    return item?.[fieldId] ?? '';
+  };
+
+  // Render PersonCard for person-type entities
+  const renderPersonCard = (item: any, index: number) => {
+    const nameField = config?.nameField || 'name';
+    const avatarField = config?.avatarField;
+    const subtitleField = config?.subtitleField;
+    const statusField = config?.statusField;
+    const fieldMappings = config?.fieldMappings || [];
+
+    // Build fields array for PersonCard
+    const fields = fieldMappings
+      .filter((m: any) => m && getFieldValue(item, m.field))
+      .map((m: any) => ({
+        icon: m.icon || '📝',
+        value: String(getFieldValue(item, m.field)),
+        type: m.type || 'text',
+      }));
+
+    // Build status if available
+    const status = statusField && item[statusField] ? {
+      label: String(item[statusField]),
+      color: getPersonCardStatusColor(item[statusField]),
+    } : undefined;
+
+    return (
+      <PersonCard
+        key={item?.id || index}
+        name={String(getFieldValue(item, nameField) || 'Unknown')}
+        avatar={avatarField ? getFieldValue(item, avatarField) : undefined}
+        subtitle={subtitleField ? String(getFieldValue(item, subtitleField)) : undefined}
+        fields={fields}
+        status={status}
+        primaryAction={config?.primaryAction ? {
+          ...config.primaryAction,
+          onClick: () => dispatchCardAction(config.primaryAction.label || 'View', item.id),
+        } : undefined}
+        secondaryActions={config?.secondaryActions?.map((a: any) => ({
+          ...a,
+          onClick: () => dispatchCardAction(a.label, item.id),
+        }))}
+        onClick={() => dispatchCardAction('View', item.id)}
+      />
+    );
+  };
+
+  // Render ItemCard for item-type entities
+  const renderItemCard = (item: any, index: number) => {
+    const titleField = config?.titleField || 'name';
+    const imageField = config?.imageField;
+    const subtitleField = config?.subtitleField;
+    const priceField = config?.priceField;
+    const statusField = config?.statusField;
+    const fieldMappings = config?.fieldMappings || [];
+
+    // Build fields array for ItemCard
+    const fields = fieldMappings
+      .filter((m: any) => m && getFieldValue(item, m.field))
+      .map((m: any) => ({
+        label: m.label || m.field,
+        value: String(getFieldValue(item, m.field)),
+      }));
+
+    // Build status if available
+    const status = statusField && item[statusField] ? {
+      label: String(item[statusField]),
+      color: getItemCardStatusColor(item[statusField]),
+    } : undefined;
+
+    return (
+      <ItemCard
+        key={item?.id || index}
+        title={String(getFieldValue(item, titleField) || 'Unknown')}
+        image={imageField ? getFieldValue(item, imageField) : undefined}
+        subtitle={subtitleField ? String(getFieldValue(item, subtitleField)) : undefined}
+        price={priceField ? getFieldValue(item, priceField) : undefined}
+        fields={fields}
+        status={status}
+        actions={config?.actions?.map((a: any) => ({
+          ...a,
+          onClick: () => dispatchCardAction(a.label, item.id),
+        }))}
+        onClick={() => dispatchCardAction('View', item.id)}
+      />
+    );
+  };
+
+  // Render default card (shadcn-styled with smart field display)
+  // IMPROVED: Better formatting for dates, phones, currency; cleaner layout
+  const renderDefaultCard = (item: any, index: number) => {
+    if (renderItem && typeof renderItem === 'function') {
+      return (
+        <div key={item?.id || index} className="p-4 bg-card border rounded-lg hover:shadow-md transition-all">
+          {renderItem(item) as React.ReactNode}
+        </div>
+      );
+    }
+
+    // Fields to always hide (internal/system fields)
+    const hiddenFields = new Set([
+      'id', 'createdAt', 'updatedAt', 'created_at', 'updated_at',
+      '_id', '__v', 'password', 'hash', 'salt', 'token'
+    ]);
+
+    // Smart field extraction - filter out hidden and complex fields
+    const entries = Object.entries(item || {}).filter(([key, value]) => 
+      typeof value !== 'function' && 
+      (typeof value !== 'object' || value === null) &&
+      !hiddenFields.has(key) &&
+      !key.startsWith('_')
+    );
+    
+    // Find primary fields for structured display
+    const nameEntry = entries.find(([key]) => 
+      key.toLowerCase() === 'name' || 
+      key.toLowerCase() === 'title' ||
+      key.toLowerCase() === 'jobtitle' ||
+      key.toLowerCase() === 'subject'
+    );
+    const statusEntry = entries.find(([key]) => 
+      key.toLowerCase() === 'status' || key.toLowerCase() === 'state'
+    );
+    const emailEntry = entries.find(([key]) => 
+      key.toLowerCase() === 'email' || key.toLowerCase().includes('email')
+    );
+    const phoneEntry = entries.find(([key]) => 
+      key.toLowerCase() === 'phone' || key.toLowerCase().includes('phone')
+    );
+    const dateEntry = entries.find(([key]) => 
+      key.toLowerCase().includes('date') || 
+      key.toLowerCase().includes('time') ||
+      key.toLowerCase() === 'scheduleddate' ||
+      key.toLowerCase() === 'appointmentdate'
+    );
+    const amountEntry = entries.find(([key]) => 
+      key.toLowerCase().includes('amount') || 
+      key.toLowerCase().includes('price') ||
+      key.toLowerCase().includes('total') ||
+      key.toLowerCase().includes('cost')
+    );
+    
+    // Other fields - exclude ones we're showing specially, limit for clean UI
+    const shownFields = new Set([
+      nameEntry?.[0], statusEntry?.[0], emailEntry?.[0], 
+      phoneEntry?.[0], dateEntry?.[0], amountEntry?.[0]
+    ].filter(Boolean));
+    
+    const otherEntries = entries
+      .filter(([key]) => !shownFields.has(key))
+      .slice(0, 3); // Limit to 3 additional fields for cleaner cards
+    
+    // Smart value formatting
+    const formatValue = (key: string, value: any): string => {
+      if (value === null || value === undefined || value === '') return '-';
+      const keyLower = key.toLowerCase();
+      const strValue = String(value);
+      
+      // Date formatting
+      if (keyLower.includes('date') || keyLower.endsWith('at') || keyLower.includes('time')) {
+        try { 
+          const date = new Date(strValue);
+          if (!isNaN(date.getTime())) {
+            // If it has time component, show date and time
+            if (keyLower.includes('time') || strValue.includes('T')) {
+              return date.toLocaleDateString(undefined, { 
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+              });
+            }
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        } catch { /* fall through */ }
+      }
+      
+      // Currency formatting
+      if (keyLower.includes('amount') || keyLower.includes('price') || 
+          keyLower.includes('cost') || keyLower.includes('total') ||
+          keyLower.includes('rent') || keyLower.includes('fee')) {
+        const num = parseFloat(strValue);
+        if (!isNaN(num)) {
+          return new Intl.NumberFormat('en-US', { 
+            style: 'currency', 
+            currency: 'USD',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2 
+          }).format(num);
+        }
+      }
+      
+      // Phone formatting
+      if (keyLower.includes('phone')) {
+        const digits = strValue.replace(/\D/g, '');
+        if (digits.length === 10) {
+          return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+        }
+        if (digits.length === 11 && digits.startsWith('1')) {
+          return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+        }
+      }
+      
+      // Boolean formatting
+      if (typeof value === 'boolean') {
+        return value ? 'Yes' : 'No';
+      }
+      
+      // Truncate long values
+      return strValue.length > 50 ? strValue.substring(0, 47) + '...' : strValue;
+    };
+
+    const formatLabel = (key: string): string => {
+      return key
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/[_-]/g, ' ')
+        .replace(/^./, str => str.toUpperCase())
+        .trim();
+    };
+
+    const getStatusColor = (status: string): string => {
+      const s = String(status).toLowerCase().replace(/[_-]/g, '');
+      // Green - positive/complete states
+      if (['active', 'completed', 'paid', 'approved', 'done', 'confirmed', 'delivered', 'checkedin', 'instock'].some(x => s.includes(x))) {
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+      }
+      // Yellow - in-progress/waiting states
+      if (['pending', 'waiting', 'processing', 'scheduled', 'inprogress', 'new', 'draft', 'booked'].some(x => s.includes(x))) {
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
+      }
+      // Blue - informational states
+      if (['trial', 'frozen', 'reserved', 'sent'].some(x => s.includes(x))) {
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+      }
+      // Red - negative states
+      if (['cancelled', 'rejected', 'failed', 'expired', 'inactive', 'overdue', 'noshow', 'outofstock'].some(x => s.includes(x))) {
+        return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+      }
+      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+    };
+
+    // Format status label (convert snake_case to Title Case)
+    const formatStatus = (status: string): string => {
+      return String(status)
+        .replace(/[_-]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    };
+
+    return (
+      <div 
+        key={item?.id || index} 
+        className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all cursor-pointer group"
+        onClick={() => dispatchCardAction('View', item?.id)}
+      >
+        {/* Header with name and status */}
+        <div className="px-4 py-3 border-b bg-muted/20 group-hover:bg-muted/40 transition-colors">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-base truncate text-foreground">
+                {nameEntry ? String(nameEntry[1]) : `Item ${index + 1}`}
+              </h3>
+              {/* Show date/time if available as subtitle */}
+              {dateEntry && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {formatValue(dateEntry[0], dateEntry[1])}
+                </p>
+              )}
+            </div>
+            {statusEntry && (
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${getStatusColor(String(statusEntry[1]))}`}>
+                {formatStatus(String(statusEntry[1]))}
+              </span>
+            )}
+          </div>
+        </div>
+        
+        {/* Content */}
+        <div className="px-4 py-3 space-y-2">
+          {/* Contact info row */}
+          {(emailEntry || phoneEntry) && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              {emailEntry && (
+                <a 
+                  href={`mailto:${emailEntry[1]}`} 
+                  className="flex items-center gap-1.5 text-muted-foreground hover:text-primary transition-colors" 
+                  onClick={e => e.stopPropagation()}
+                >
+                  <span className="text-xs">✉️</span>
+                  <span className="truncate max-w-[180px]">{String(emailEntry[1])}</span>
+                </a>
+              )}
+              {phoneEntry && (
+                <a 
+                  href={`tel:${phoneEntry[1]}`} 
+                  className="flex items-center gap-1.5 text-muted-foreground hover:text-primary transition-colors" 
+                  onClick={e => e.stopPropagation()}
+                >
+                  <span className="text-xs">📞</span>
+                  <span>{formatValue(phoneEntry[0], phoneEntry[1])}</span>
+                </a>
+              )}
+            </div>
+          )}
+          
+          {/* Amount highlight if present */}
+          {amountEntry && (
+            <div className="flex items-center justify-between py-1">
+              <span className="text-sm text-muted-foreground">{formatLabel(amountEntry[0])}</span>
+              <span className="font-semibold text-foreground">{formatValue(amountEntry[0], amountEntry[1])}</span>
+            </div>
+          )}
+          
+          {/* Other fields - compact display */}
+          {otherEntries.length > 0 && (
+            <div className="pt-1 border-t border-dashed space-y-1">
+              {otherEntries.map(([key, value]) => (
+                <div key={key} className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground text-xs">{formatLabel(key)}</span>
+                  <span className="text-foreground truncate ml-2 max-w-[60%] text-right">{formatValue(key, value)}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
-      ))}
+      </div>
+    );
+  };
+
+  // Determine grid class based on card type and compact mode
+  // Compact mode (inside dashboard widgets) uses fewer columns to prevent cramped cards
+  const gridClass = cardType === 'personCard' || cardType === 'itemCard'
+    ? compact 
+      ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3'  // Fewer columns in compact mode
+      : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
+    : 'space-y-3';
+
+  return (
+    <div className={gridClass} style={style as React.CSSProperties} {...restProps}>
+      {items.map((item: any, index: number) => {
+        if (cardType === 'personCard') {
+          return renderPersonCard(item, index);
+        }
+        if (cardType === 'itemCard') {
+          return renderItemCard(item, index);
+        }
+        return renderDefaultCard(item, index);
+      })}
     </div>
   );
 };
+
+// Helper function to get status color for PersonCard (subset of colors)
+function getPersonCardStatusColor(status: string): 'green' | 'yellow' | 'red' | 'gray' {
+  const statusLower = String(status).toLowerCase();
+  if (['active', 'completed', 'paid', 'approved', 'done', 'checked_in'].some(s => statusLower.includes(s))) {
+    return 'green';
+  }
+  if (['pending', 'waiting', 'in_progress', 'processing', 'new', 'scheduled'].some(s => statusLower.includes(s))) {
+    return 'yellow';
+  }
+  if (['cancelled', 'rejected', 'failed', 'overdue', 'inactive'].some(s => statusLower.includes(s))) {
+    return 'red';
+  }
+  return 'gray';
+}
+
+// Helper function to get status color for ItemCard (includes more colors)
+function getItemCardStatusColor(status: string): 'green' | 'yellow' | 'red' | 'blue' | 'gray' | 'purple' {
+  const statusLower = String(status).toLowerCase();
+  if (['active', 'completed', 'paid', 'approved', 'done', 'in_stock'].some(s => statusLower.includes(s))) {
+    return 'green';
+  }
+  if (['pending', 'waiting', 'in_progress', 'processing'].some(s => statusLower.includes(s))) {
+    return 'yellow';
+  }
+  if (['cancelled', 'rejected', 'failed', 'overdue', 'out_of_stock'].some(s => statusLower.includes(s))) {
+    return 'red';
+  }
+  if (['new', 'scheduled', 'upcoming'].some(s => statusLower.includes(s))) {
+    return 'blue';
+  }
+  if (['premium', 'featured', 'special'].some(s => statusLower.includes(s))) {
+    return 'purple';
+  }
+  return 'gray';
+}
 
 // Calendar Component (simple grouped list)
 const CalendarComponent: React.FC<ComponentProps> = ({
@@ -245,8 +648,8 @@ const CalendarComponent: React.FC<ComponentProps> = ({
   return (
     <div className="space-y-4" style={style as React.CSSProperties} {...restProps}>
       {[...grouped.entries()].map(([date, groupItems]) => (
-        <div key={date} className="bg-white border border-solid border-gray-200 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-600 mb-3">{date}</h3>
+        <div key={date} className="bg-card border rounded-lg p-4">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">{date}</h3>
           <div className="space-y-2">
             {groupItems.map((item, index) => (
               <div key={String(item.id || index)} className="flex items-center justify-between text-sm text-gray-800">
@@ -305,8 +708,8 @@ const KanbanComponent: React.FC<ComponentProps> = ({
       {[...columnMap.entries()].map(([columnId, columnItems]) => {
         const columnMeta = columnDefs.find((col: any) => String(col.id || col.value) === columnId);
         return (
-          <div key={columnId} className="bg-white border border-solid border-gray-200 rounded-lg p-3">
-            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+          <div key={columnId} className="bg-card border rounded-lg p-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
               {String(columnMeta?.title || columnMeta?.label || columnId || 'Column')}
             </div>
             <div className="space-y-2">
@@ -325,21 +728,72 @@ const KanbanComponent: React.FC<ComponentProps> = ({
   );
 };
 
-// Card Component
-const CardComponent: React.FC<ComponentProps> = ({
-  title,
-  value,
-  children,
+// Card Component - using shadcn wrapper
+const CardComponent = Card;
+
+// PersonCard Component - for person-type entities
+const PersonCardComponent: React.FC<ComponentProps> = ({
+  name,
+  avatar,
+  subtitle,
+  fields,
+  primaryAction,
+  secondaryActions,
+  status,
+  tags,
+  onClick,
   ...otherProps
 }) => {
-  const { id, style, ...restProps } = otherProps;
-
+  const { id, style, className, ...restProps } = otherProps;
+  
   return (
-    <div className="bg-white border border-solid border-gray-200 rounded-lg p-6 shadow-sm" style={style as React.CSSProperties} {...restProps}>   
-      {title != null && String(title) && <h3 className="text-lg font-semibold mb-2">{String(title)}</h3>}
-      {value !== undefined && <div className="text-2xl font-bold">{String(value)}</div>}
-      {children as React.ReactNode}
-    </div>
+    <PersonCard
+      name={String(name || 'Unknown')}
+      avatar={avatar as string | undefined}
+      subtitle={subtitle as string | undefined}
+      fields={Array.isArray(fields) ? fields as any[] : undefined}
+      primaryAction={primaryAction as any}
+      secondaryActions={Array.isArray(secondaryActions) ? secondaryActions as any[] : undefined}
+      status={status as any}
+      tags={Array.isArray(tags) ? tags as string[] : undefined}
+      onClick={onClick as (() => void) | undefined}
+      className={className as string | undefined}
+      style={style as React.CSSProperties | undefined}
+    />
+  );
+};
+
+// ItemCard Component - for non-person entities
+const ItemCardComponent: React.FC<ComponentProps> = ({
+  title,
+  image,
+  subtitle,
+  price,
+  currency,
+  fields,
+  status,
+  actions,
+  tags,
+  onClick,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <ItemCard
+      title={String(title || 'Unknown')}
+      image={image as string | undefined}
+      subtitle={subtitle as string | undefined}
+      price={price as number | string | undefined}
+      currency={currency as string | undefined}
+      fields={Array.isArray(fields) ? fields as any[] : undefined}
+      status={status as any}
+      actions={Array.isArray(actions) ? actions as any[] : undefined}
+      tags={Array.isArray(tags) ? tags as string[] : undefined}
+      onClick={onClick as (() => void) | undefined}
+      className={className as string | undefined}
+      style={style as React.CSSProperties | undefined}
+    />
   );
 };
 
@@ -373,7 +827,7 @@ const FormComponent: React.FC<ComponentProps> = ({
       {children as React.ReactNode}
       <button
         type="submit"
-        className="w-full bg-purple-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-purple-700 transition-colors"
+        className="w-full bg-primary text-primary-foreground font-semibold py-2 px-6 rounded-md hover:bg-primary/90 transition-colors"
       >
         {String(submitLabel || 'Submit')}
       </button>
@@ -418,8 +872,8 @@ const TableComponent: React.FC<ComponentProps> = ({
 
   return (
     <div className="overflow-x-auto" style={style as React.CSSProperties} {...restProps}>
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+      <table className="min-w-full divide-y divide-border">
+        <thead className="bg-muted">
           <tr>
             {cols.length > 0 ? (
               cols.map((col: any, idx: number) => (
@@ -438,7 +892,7 @@ const TableComponent: React.FC<ComponentProps> = ({
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
           {items.map((item: any, idx: number) => (
-            <tr key={item?.id || idx} className="hover:bg-gray-50">
+            <tr key={item?.id || idx} className="hover:bg-muted/50">
               {cols.length > 0 ? (
                 cols.map((col: any, colIdx: number) => (
                   <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -491,9 +945,9 @@ const ChartComponent: React.FC<ComponentProps> = ({
   const dataKeys = chartData && typeof chartData === 'object' ? Object.keys(chartData) : [];
 
   return (
-    <div className="bg-white border border-solid border-gray-200 rounded-lg p-6 shadow-sm" style={style as React.CSSProperties} {...restProps}>   
-      {title != null && String(title) && <h3 className="text-lg font-semibold mb-4">{String(title)}</h3>}
-      <div className="h-64 flex items-center justify-center bg-gray-50 rounded border-2 border-dashed border-gray-300">
+    <div className="bg-card border rounded-lg p-6" style={style as React.CSSProperties} {...restProps}>   
+      {title != null && String(title) && <h3 className="text-lg font-semibold mb-4 text-foreground">{String(title)}</h3>}
+      <div className="h-64 flex items-center justify-center bg-muted rounded-md border-2 border-dashed border-border">
         <div className="text-center text-gray-500">
           <div className="text-2xl mb-2">📊</div>
           <div className="text-sm font-medium">Chart: {String(type || 'bar')}</div>
@@ -530,7 +984,7 @@ const NavigationComponent: React.FC<ComponentProps> = ({
           <a
             key={item?.id || idx}
             href={item?.href || item?.route || '#'}
-            className="px-4 py-2 text-gray-700 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+            className="px-4 py-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
             onClick={(e) => {
               if (item?.onClick && typeof item.onClick === 'function') {
                 e.preventDefault();
@@ -548,56 +1002,8 @@ const NavigationComponent: React.FC<ComponentProps> = ({
   );
 };
 
-const ModalComponent: React.FC<ComponentProps> = ({
-  isOpen = false,
-  onClose,
-  title,
-  children,
-  ...otherProps
-}) => {
-  const { id, style, ...restProps } = otherProps;
-  const open = Boolean(isOpen);
-
-  if (!open) return null;
-
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget && onClose && typeof onClose === 'function') {
-      onClose(e);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={handleBackdropClick}
-      style={{ zIndex: 1000 }}
-    >
-      <div
-        className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
-        style={style as React.CSSProperties}
-        {...restProps}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {title != null && String(title) && (
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold">{String(title)}</h2>
-            {typeof onClose === 'function' ? (
-              <button
-                onClick={onClose as React.MouseEventHandler<HTMLButtonElement>}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-              >
-                ×
-              </button>
-            ) : null}
-          </div>
-        )}
-        <div className="p-6">
-          {children as React.ReactNode}
-        </div>
-      </div>
-    </div>
-  );
-};
+// Modal Component - using shadcn wrapper
+const ModalComponent = Modal;
 
 const ImageComponent: React.FC<ComponentProps> = ({
   src,
@@ -774,12 +1180,14 @@ const GalleryComponent: React.FC<ComponentProps> = ({
           onClick={() => setSelectedIndex(null)}
         >
           <button 
+            type="button"
             className="absolute top-4 right-4 text-white text-3xl hover:text-gray-300"
             onClick={() => setSelectedIndex(null)}
           >
             ×
           </button>
           <button 
+            type="button"
             className="absolute left-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 disabled:opacity-50"
             onClick={(e) => { e.stopPropagation(); setSelectedIndex(Math.max(0, selectedIndex - 1)); }}
             disabled={selectedIndex === 0}
@@ -793,6 +1201,7 @@ const GalleryComponent: React.FC<ComponentProps> = ({
             onClick={(e) => e.stopPropagation()}
           />
           <button 
+            type="button"
             className="absolute right-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 disabled:opacity-50"
             onClick={(e) => { e.stopPropagation(); setSelectedIndex(Math.min(items.length - 1, selectedIndex + 1)); }}
             disabled={selectedIndex === items.length - 1}
@@ -852,7 +1261,7 @@ const ChatComponent: React.FC<ComponentProps> = ({
 
   return (
     <div 
-      className="flex flex-col h-96 bg-white border border-solid border-gray-200 rounded-lg overflow-hidden"
+      className="flex flex-col h-96 bg-card border rounded-lg overflow-hidden"
       style={style as React.CSSProperties}
       {...restProps}
     >
@@ -875,8 +1284,8 @@ const ChatComponent: React.FC<ComponentProps> = ({
                 <div 
                   className={`max-w-[70%] rounded-lg px-4 py-2 ${
                     isCurrentUser 
-                      ? 'bg-purple-600 text-white' 
-                      : 'bg-gray-100 text-gray-900'
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'bg-muted text-foreground'
                   }`}
                 >
                   {!isCurrentUser && (
@@ -884,7 +1293,7 @@ const ChatComponent: React.FC<ComponentProps> = ({
                   )}
                   <div className="text-sm">{String(message)}</div>
                   {timestamp && (
-                    <div className={`text-xs mt-1 ${isCurrentUser ? 'text-purple-200' : 'text-gray-400'}`}>
+                    <div className={`text-xs mt-1 ${isCurrentUser ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                       {new Date(String(timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   )}
@@ -903,12 +1312,13 @@ const ChatComponent: React.FC<ComponentProps> = ({
           onChange={(e) => setNewMessage(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
           placeholder={String(placeholder)}
-          className="flex-1 px-4 py-2 border border-solid border-gray-300 rounded-full focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+          className="flex-1 px-4 py-2 border border-input rounded-full focus-visible:ring-2 focus-visible:ring-ring text-sm"
         />
         <button
+          type="button"
           onClick={handleSend}
           disabled={!newMessage.trim()}
-          className="px-4 py-2 bg-purple-600 text-white rounded-full hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-4 py-2 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -994,9 +1404,9 @@ const MapComponent: React.FC<ComponentProps> = ({
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
         <div className="text-center">
           <div className="text-4xl mb-2">🗺️</div>
-          <div className="bg-white/90 backdrop-blur rounded-lg px-4 py-2 shadow-lg">
-            <div className="text-sm font-medium text-gray-700">Map View</div>
-            <div className="text-xs text-gray-500">
+          <div className="bg-background/90 backdrop-blur rounded-md border px-4 py-2">
+            <div className="text-sm font-medium text-foreground">Map View</div>
+            <div className="text-xs text-muted-foreground">
               Center: {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
             </div>
             <div className="text-xs text-gray-500">Zoom: {String(zoom)}</div>
@@ -1006,7 +1416,7 @@ const MapComponent: React.FC<ComponentProps> = ({
 
       {/* Markers list */}
       {markers.length > 0 && (
-        <div className="absolute top-3 left-3 bg-white/90 backdrop-blur rounded-lg shadow-lg max-h-48 overflow-y-auto">
+        <div className="absolute top-3 left-3 bg-background/90 backdrop-blur rounded-md border max-h-48 overflow-y-auto">
           <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase">
             {markers.length} Location{markers.length !== 1 ? 's' : ''}
           </div>
@@ -1030,10 +1440,20 @@ const MapComponent: React.FC<ComponentProps> = ({
 
       {/* Zoom controls placeholder */}
       <div className="absolute bottom-3 right-3 flex flex-col gap-1">
-        <button className="w-8 h-8 bg-white/90 backdrop-blur rounded shadow hover:bg-white flex items-center justify-center text-gray-600">
+        <button 
+          type="button"
+          onClick={() => console.log('Map zoom in - not yet implemented')}
+          className="w-8 h-8 bg-white/90 backdrop-blur rounded shadow hover:bg-white flex items-center justify-center text-gray-600"
+          title="Zoom in (not implemented)"
+        >
           +
         </button>
-        <button className="w-8 h-8 bg-white/90 backdrop-blur rounded shadow hover:bg-white flex items-center justify-center text-gray-600">
+        <button 
+          type="button"
+          onClick={() => console.log('Map zoom out - not yet implemented')}
+          className="w-8 h-8 bg-white/90 backdrop-blur rounded shadow hover:bg-white flex items-center justify-center text-gray-600"
+          title="Zoom out (not implemented)"
+        >
           −
         </button>
       </div>
@@ -1172,67 +1592,628 @@ const GridComponent: React.FC<ComponentProps> = ({
   );
 };
 
-// Divider Component
-const DividerComponent: React.FC<ComponentProps> = ({
-  orientation = 'horizontal',
-  color,
-  thickness = 1,
-  spacing = 4,
+// Divider Component - using shadcn wrapper
+const DividerComponent = Divider as React.FC<ComponentProps>;
+
+// Badge Component - using shadcn wrapper
+const BadgeComponent = Badge as React.FC<ComponentProps>;
+
+// ============================================================
+// NEW SHADCN-BASED WRAPPER COMPONENTS
+// ============================================================
+
+// Icon map for converting string icon names to Lucide components
+const STATS_ICON_MAP: Record<string, LucideIcon> = {
+  // Common stats/KPI icons
+  users: Users,
+  user: Users,
+  members: Users,
+  people: Users,
+  dollar: DollarSign,
+  money: DollarSign,
+  revenue: DollarSign,
+  currency: DollarSign,
+  payment: DollarSign,
+  payments: DollarSign,
+  chart: BarChart3,
+  analytics: BarChart3,
+  stats: BarChart3,
+  graph: BarChart3,
+  bar: BarChart3,
+  calendar: CalendarIcon,
+  schedule: CalendarIcon,
+  date: CalendarIcon,
+  trending: TrendingUp,
+  growth: TrendingUp,
+  increase: TrendingUp,
+  up: TrendingUp,
+  decline: TrendingDown,
+  decrease: TrendingDown,
+  down: TrendingDown,
+  activity: Activity,
+  pulse: Activity,
+  cart: ShoppingCart,
+  shopping: ShoppingCart,
+  orders: ShoppingCart,
+  package: Package,
+  inventory: Package,
+  products: Package,
+  mail: Mail,
+  email: Mail,
+  messages: Mail,
+  bell: Bell,
+  notifications: Bell,
+  alerts: Bell,
+  heart: Heart,
+  likes: Heart,
+  favorites: Heart,
+  star: Star,
+  rating: Star,
+  reviews: Star,
+  clock: Clock,
+  time: Clock,
+  duration: Clock,
+  check: CheckCircle,
+  complete: CheckCircle,
+  success: CheckCircle,
+  done: CheckCircle,
+  alert: AlertCircle,
+  warning: AlertCircle,
+  error: AlertCircle,
+  file: FileText,
+  document: FileText,
+  documents: FileText,
+  folder: Folder,
+  files: Folder,
+  settings: Settings,
+  config: Settings,
+  home: Home,
+  dashboard: Home,
+  // Emoji mappings
+  '📊': BarChart3,
+  '📈': TrendingUp,
+  '📉': TrendingDown,
+  '👤': Users,
+  '👥': Users,
+  '💰': DollarSign,
+  '💵': DollarSign,
+  '📅': CalendarIcon,
+  '🛒': ShoppingCart,
+  '📦': Package,
+  '✉️': Mail,
+  '🔔': Bell,
+  '❤️': Heart,
+  '⭐': Star,
+  '⏰': Clock,
+  '✅': CheckCircle,
+  '⚠️': AlertCircle,
+  '📄': FileText,
+  '📁': Folder,
+  '⚙️': Settings,
+  '🏠': Home,
+};
+
+/**
+ * Convert a string icon name to a rendered Lucide icon element
+ */
+function getStatsIcon(icon: unknown): React.ReactNode | undefined {
+  if (!icon) return undefined;
+  
+  // If it's already a React element, return it as-is
+  if (React.isValidElement(icon)) {
+    return icon;
+  }
+  
+  // If it's a string, look it up in the icon map
+  if (typeof icon === 'string') {
+    const iconKey = icon.toLowerCase().trim();
+    const IconComponent = STATS_ICON_MAP[iconKey];
+    if (IconComponent) {
+      return <IconComponent className="size-4" />;
+    }
+    // If no match found but it's an emoji, return it as-is
+    if (/\p{Emoji}/u.test(icon)) {
+      return icon;
+    }
+    // No match found, return undefined (don't render raw string)
+    return undefined;
+  }
+  
+  return undefined;
+}
+
+// Stats Card Component - KPI display
+const StatsCardComponent: React.FC<ComponentProps> = ({
+  title,
+  value,
+  change,
+  description,
+  subDescription,
+  icon,
+  currency,
+  currencySymbol,
+  onClick,
   ...otherProps
 }) => {
-  const { id, style, ...restProps } = otherProps;
-  const isVertical = String(orientation) === 'vertical';
-  const spacingSize = Number(spacing) * 4;
-  const thicknessSize = Number(thickness);
-
+  const { id, style, className, ...restProps } = otherProps;
+  
+  // Convert string icon to Lucide component
+  const resolvedIcon = getStatsIcon(icon);
+  
   return (
-    <div
-      className={isVertical ? 'self-stretch' : 'w-full'}
-      style={{
-        [isVertical ? 'width' : 'height']: `${thicknessSize}px`,
-        [isVertical ? 'marginLeft' : 'marginTop']: `${spacingSize}px`,
-        [isVertical ? 'marginRight' : 'marginBottom']: `${spacingSize}px`,
-        backgroundColor: color ? String(color) : '#e2e8f0',
-        ...(style as React.CSSProperties),
-      }}
-      {...restProps}
+    <StatsCard
+      title={String(title || 'Stat')}
+      value={value as string | number}
+      change={change as number | undefined}
+      description={description as string | undefined}
+      subDescription={subDescription as string | undefined}
+      icon={resolvedIcon}
+      currency={Boolean(currency)}
+      currencySymbol={currencySymbol as string | undefined}
+      onClick={onClick as (() => void) | undefined}
+      className={className as string | undefined}
     />
   );
 };
 
-// Badge Component
-const BadgeComponent: React.FC<ComponentProps> = ({
-  text,
+// Stats Card Grid Component
+const StatsCardGridComponent: React.FC<ComponentProps> = ({
   children,
-  variant = 'default',
-  color,
+  columns,
   ...otherProps
 }) => {
-  const { id, style, ...restProps } = otherProps;
+  const { id, style, className, ...restProps } = otherProps;
   
-  const variantStr = String(variant);
-  const variantClasses: Record<string, string> = {
-    default: 'bg-gray-100 text-gray-800',
-    primary: 'bg-purple-100 text-purple-800',
-    success: 'bg-green-100 text-green-800',
-    warning: 'bg-yellow-100 text-yellow-800',
-    error: 'bg-red-100 text-red-800',
-    info: 'bg-blue-100 text-blue-800',
-  };
-
-  const content = text ?? children;
-
   return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${variantClasses[variantStr] || variantClasses.default}`}
-      style={{
-        backgroundColor: color ? String(color) : undefined,
-        ...(style as React.CSSProperties),
-      }}
-      {...restProps}
+    <StatsCardGrid
+      columns={columns as 1 | 2 | 3 | 4 | undefined}
+      className={className as string | undefined}
     >
-      {content ? String(content) : ''}
-    </span>
+      {children as React.ReactNode}
+    </StatsCardGrid>
+  );
+};
+
+// Area Chart Component
+const AreaChartComponent: React.FC<ComponentProps> = ({
+  title,
+  description,
+  data,
+  source,
+  xAxisKey,
+  dataKeys,
+  dataLabels,
+  colors,
+  showGrid,
+  height,
+  trendPercent,
+  trendDescription,
+  footerText,
+  stacked,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  // Handle data from source if provided
+  let chartData: { [key: string]: string | number }[] = [];
+  if (Array.isArray(data)) {
+    chartData = data.map(item => {
+      const mapped: { [key: string]: string | number } = {};
+      if (item && typeof item === 'object') {
+        Object.entries(item).forEach(([k, v]) => {
+          if (typeof v === 'string' || typeof v === 'number') {
+            mapped[k] = v;
+          }
+        });
+      }
+      return mapped;
+    });
+  } else if (data && typeof data === 'object' && source) {
+    const sourceData = (data as Record<string, unknown[]>)[String(source)];
+    if (Array.isArray(sourceData)) {
+      chartData = sourceData.map(item => {
+        const mapped: { [key: string]: string | number } = {};
+        if (item && typeof item === 'object') {
+          Object.entries(item as Record<string, unknown>).forEach(([k, v]) => {
+            if (typeof v === 'string' || typeof v === 'number') {
+              mapped[k] = v;
+            }
+          });
+        }
+        return mapped;
+      });
+    }
+  }
+  
+  // Default data keys if not provided
+  const keys = Array.isArray(dataKeys) ? dataKeys.map(String) : ['value'];
+  
+  return (
+    <AreaChartCard
+      title={String(title || 'Chart')}
+      description={description as string | undefined}
+      data={chartData}
+      xAxisKey={String(xAxisKey || 'name')}
+      dataKeys={keys}
+      dataLabels={dataLabels as Record<string, string> | undefined}
+      colors={colors as Record<string, string> | undefined}
+      showGrid={showGrid !== false}
+      height={height as number | undefined}
+      trendPercent={trendPercent as number | undefined}
+      trendDescription={trendDescription as string | undefined}
+      footerText={footerText as string | undefined}
+      stacked={Boolean(stacked)}
+      className={className as string | undefined}
+    />
+  );
+};
+
+// Data Table Component (using SimpleDataTable)
+// ENHANCED: Supports format hints for dates, currency, phone, email, badges
+const DataTableComponent: React.FC<ComponentProps> = ({
+  data,
+  source,
+  columns,
+  searchable,
+  searchPlaceholder,
+  paginated,
+  pageSize,
+  onRowClick,
+  emptyMessage,
+  compact,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  // Handle data from source
+  let tableData: Record<string, unknown>[] = [];
+  if (Array.isArray(data)) {
+    tableData = data;
+  } else if (data && typeof data === 'object' && source) {
+    const sourceData = (data as Record<string, unknown[]>)[String(source)];
+    if (Array.isArray(sourceData)) {
+      tableData = sourceData as Record<string, unknown>[];
+    }
+  }
+  
+  // Hidden fields to filter out
+  const hiddenFields = new Set(['id', 'createdAt', 'updatedAt', 'created_at', 'updated_at', '_id']);
+  
+  // Cell renderer that formats values based on format hint
+  const createCellRenderer = (format?: string, fieldName?: string) => {
+    return (value: unknown, _row: Record<string, unknown>) => {
+      if (value === null || value === undefined || value === '') {
+        return <span className="text-muted-foreground">-</span>;
+      }
+      
+      const strValue = String(value);
+      const fieldLower = (fieldName || '').toLowerCase();
+      
+      // Badge format for status fields
+      if (format === 'badge' || fieldLower === 'status' || fieldLower === 'state') {
+        const statusLower = strValue.toLowerCase().replace(/[_-]/g, '');
+        let badgeClass = 'bg-gray-100 text-gray-800';
+        
+        if (['active', 'completed', 'paid', 'approved', 'done', 'confirmed', 'delivered'].some(s => statusLower.includes(s))) {
+          badgeClass = 'bg-green-100 text-green-800';
+        } else if (['pending', 'waiting', 'processing', 'scheduled', 'new', 'draft', 'booked'].some(s => statusLower.includes(s))) {
+          badgeClass = 'bg-yellow-100 text-yellow-800';
+        } else if (['cancelled', 'rejected', 'failed', 'expired', 'inactive', 'overdue'].some(s => statusLower.includes(s))) {
+          badgeClass = 'bg-red-100 text-red-800';
+        } else if (['trial', 'frozen', 'reserved', 'sent'].some(s => statusLower.includes(s))) {
+          badgeClass = 'bg-blue-100 text-blue-800';
+        }
+        
+        const displayValue = strValue.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badgeClass}`}>{displayValue}</span>;
+      }
+      
+      // Date format
+      if (format === 'date' || fieldLower.includes('date') || fieldLower.endsWith('at')) {
+        try {
+          const date = new Date(strValue);
+          if (!isNaN(date.getTime())) {
+            const hasTime = strValue.includes('T') || fieldLower.includes('time');
+            if (hasTime) {
+              return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            }
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        } catch { /* fall through */ }
+      }
+      
+      // Currency format
+      if (format === 'currency' || ['amount', 'price', 'cost', 'total', 'rent', 'fee'].some(k => fieldLower.includes(k))) {
+        const num = parseFloat(strValue);
+        if (!isNaN(num)) {
+          return new Intl.NumberFormat('en-US', { 
+            style: 'currency', 
+            currency: 'USD',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+          }).format(num);
+        }
+      }
+      
+      // Phone format
+      if (format === 'phone' || fieldLower.includes('phone')) {
+        const digits = strValue.replace(/\D/g, '');
+        if (digits.length === 10) {
+          return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+        }
+      }
+      
+      // Email format - make it a link
+      if (format === 'email' || fieldLower.includes('email')) {
+        return (
+          <a 
+            href={`mailto:${strValue}`} 
+            className="text-primary hover:underline"
+            onClick={e => e.stopPropagation()}
+          >
+            {strValue}
+          </a>
+        );
+      }
+      
+      // Boolean format
+      if (typeof value === 'boolean') {
+        return value ? 
+          <span className="text-green-600">✓ Yes</span> : 
+          <span className="text-muted-foreground">No</span>;
+      }
+      
+      // Default - truncate long values
+      return strValue.length > 40 ? strValue.substring(0, 37) + '...' : strValue;
+    };
+  };
+  
+  // Build columns from props or auto-generate
+  let tableColumns: ColumnDef<Record<string, unknown>>[] = [];
+  if (Array.isArray(columns) && columns.length > 0) {
+    tableColumns = columns
+      .filter((col: any) => !hiddenFields.has(String(col.id || col.field || col.key)))
+      .map((col: any) => {
+        const fieldName = String(col.field || col.key || col.accessor || col.id);
+        return {
+          id: String(col.id || fieldName),
+          header: String(col.header || col.label || col.name || fieldName)
+            .replace(/([A-Z])/g, ' $1')
+            .replace(/[_-]/g, ' ')
+            .trim()
+            .replace(/^\w/, c => c.toUpperCase()),
+          accessor: fieldName as keyof Record<string, unknown>,
+          sortable: col.sortable !== false,
+          align: col.align,
+          width: col.width,
+          cell: createCellRenderer(col.format, fieldName),
+        };
+      });
+  } else if (tableData.length > 0) {
+    // Auto-generate columns from first data item - exclude hidden fields
+    tableColumns = Object.keys(tableData[0])
+      .filter(key => !hiddenFields.has(key) && !key.startsWith('_'))
+      .slice(0, 6) // Limit to 6 columns
+      .map(key => ({
+        id: key,
+        header: key
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/[_-]/g, ' ')
+          .trim()
+          .replace(/^\w/, c => c.toUpperCase()),
+        accessor: key as keyof Record<string, unknown>,
+        sortable: true,
+        cell: createCellRenderer(undefined, key),
+      }));
+  }
+  
+  // Row click handler that dispatches card action event
+  const handleRowClick = (row: Record<string, unknown>) => {
+    if (onRowClick && typeof onRowClick === 'function') {
+      (onRowClick as (row: Record<string, unknown>) => void)(row);
+    } else {
+      // Default behavior: dispatch view action
+      const event = new CustomEvent('neo-card-action', {
+        detail: {
+          action: 'View',
+          itemId: row.id,
+          entityId: source || 'item',
+          source: 'table',
+        },
+        bubbles: true,
+      });
+      window.dispatchEvent(event);
+    }
+  };
+  
+  return (
+    <SimpleDataTable
+      data={tableData}
+      columns={tableColumns}
+      getRowKey={(row, index) => (row.id as string | number) || index}
+      searchable={searchable !== false}
+      searchPlaceholder={searchPlaceholder as string | undefined}
+      paginated={paginated !== false}
+      defaultPageSize={pageSize as number | undefined}
+      onRowClick={handleRowClick}
+      emptyMessage={emptyMessage as string | undefined}
+      compact={Boolean(compact)}
+      className={className as string | undefined}
+    />
+  );
+};
+
+// Login Form Component
+const LoginFormComponent: React.FC<ComponentProps> = ({
+  onSubmit,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <LoginForm className={className as string | undefined} />
+  );
+};
+
+// Progress Bar Component
+const ProgressBarComponent: React.FC<ComponentProps> = ({
+  value,
+  max = 100,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  const percentage = ((Number(value) || 0) / Number(max)) * 100;
+  
+  return (
+    <Progress 
+      value={percentage} 
+      className={className as string | undefined}
+    />
+  );
+};
+
+// Slider Component
+const SliderComponent: React.FC<ComponentProps> = ({
+  value,
+  min = 0,
+  max = 100,
+  step = 1,
+  onChange,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <Slider
+      defaultValue={[Number(value) || 0]}
+      min={Number(min)}
+      max={Number(max)}
+      step={Number(step)}
+      onValueChange={(vals: number[]) => onChange && (onChange as (v: number) => void)(vals[0])}
+      className={className as string | undefined}
+    />
+  );
+};
+
+// Accordion Component
+const AccordionComponent: React.FC<ComponentProps> = ({
+  items,
+  type = 'single',
+  collapsible = true,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  const accordionItems = Array.isArray(items) ? items : [];
+  
+  return (
+    <Accordion 
+      type={type === 'multiple' ? 'multiple' : 'single'} 
+      collapsible={type !== 'multiple' ? Boolean(collapsible) : undefined}
+      className={className as string | undefined}
+    >
+      {accordionItems.map((item: any, index: number) => (
+        <AccordionItem key={item.id || index} value={String(item.id || index)}>
+          <AccordionTrigger>{String(item.title || item.header || `Item ${index + 1}`)}</AccordionTrigger>
+          <AccordionContent>{String(item.content || item.body || '')}</AccordionContent>
+        </AccordionItem>
+      ))}
+    </Accordion>
+  );
+};
+
+// Tabs Component
+const TabsComponent: React.FC<ComponentProps> = ({
+  tabs,
+  defaultValue,
+  children,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  const tabItems = Array.isArray(tabs) ? tabs : [];
+  
+  return (
+    <Tabs 
+      defaultValue={String(defaultValue || tabItems[0]?.id || '0')}
+      className={className as string | undefined}
+    >
+      <TabsList>
+        {tabItems.map((tab: any, index: number) => (
+          <TabsTrigger key={tab.id || index} value={String(tab.id || index)}>
+            {String(tab.label || tab.title || `Tab ${index + 1}`)}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {tabItems.map((tab: any, index: number) => (
+        <TabsContent key={tab.id || index} value={String(tab.id || index)}>
+          {tab.content as React.ReactNode}
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+};
+
+// Layout wrapper components
+const SingleColumnLayout: React.FC<ComponentProps> = ({
+  children,
+  maxWidth,
+  padding,
+  centered,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <SingleColumn
+      maxWidth={maxWidth as 'sm' | 'md' | 'lg' | 'xl' | '2xl' | 'full' | undefined}
+      padding={padding as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      centered={centered !== false}
+      className={className as string | undefined}
+    >
+      {children as React.ReactNode}
+    </SingleColumn>
+  );
+};
+
+const TwoColumnLayout: React.FC<ComponentProps> = ({
+  left,
+  right,
+  ratio,
+  gap,
+  padding,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <TwoColumn
+      left={left as React.ReactNode}
+      right={right as React.ReactNode}
+      ratio={ratio as '1:1' | '1:2' | '2:1' | '1:3' | '3:1' | undefined}
+      gap={gap as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      padding={padding as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      className={className as string | undefined}
+    />
+  );
+};
+
+const DashboardGridLayout: React.FC<ComponentProps> = ({
+  children,
+  columns,
+  gap,
+  padding,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <DashboardGrid
+      columns={columns as 1 | 2 | 3 | 4 | 6 | undefined}
+      gap={gap as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      padding={padding as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      className={className as string | undefined}
+    >
+      {children as React.ReactNode}
+    </DashboardGrid>
   );
 };
 
@@ -1242,11 +2223,17 @@ export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   text: TextComponent,
   button: ButtonComponent,
   input: InputComponent,
+  textarea: Textarea as React.FC<ComponentProps>,
+  select: Select as React.FC<ComponentProps>,
+  checkbox: Checkbox as React.FC<ComponentProps>,
+  switch: Switch as React.FC<ComponentProps>,
   
   // Data display components
   list: ListComponent,
   table: TableComponent,
   card: CardComponent,
+  personCard: PersonCardComponent,
+  itemCard: ItemCardComponent,
   calendar: CalendarComponent,
   kanban: KanbanComponent,
   gallery: GalleryComponent,
@@ -1275,6 +2262,38 @@ export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   
   // UI elements
   badge: BadgeComponent,
+  
+  // ============================================================
+  // NEW SHADCN-BASED COMPONENTS
+  // ============================================================
+  
+  // Stats & KPIs
+  statsCard: StatsCardComponent,
+  statsCardGrid: StatsCardGridComponent,
+  kpiCard: StatsCardComponent, // alias
+  
+  // Charts
+  areaChart: AreaChartComponent,
+  lineChart: AreaChartComponent, // alias (area chart can be used as line)
+  
+  // Enhanced Data Display
+  dataTable: DataTableComponent,
+  advancedTable: DataTableComponent, // alias
+  
+  // Auth
+  loginForm: LoginFormComponent,
+  
+  // UI Primitives
+  progress: ProgressBarComponent,
+  progressBar: ProgressBarComponent, // alias
+  slider: SliderComponent,
+  accordion: AccordionComponent,
+  tabs: TabsComponent,
+  
+  // Layout wrappers
+  singleColumn: SingleColumnLayout,
+  twoColumn: TwoColumnLayout,
+  dashboardGrid: DashboardGridLayout,
 };
 
 export function getComponent(componentId: string): React.FC<ComponentProps> {

@@ -47,8 +47,8 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
           relative w-16 h-16 rounded-full shadow-lg transition-all duration-300
           flex items-center justify-center
           ${isListening
-            ? 'bg-red-500 hover:bg-red-600 animate-pulse scale-110'
-            : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+            ? 'bg-destructive hover:bg-destructive/90 animate-pulse scale-110'
+            : 'bg-primary hover:bg-primary/90'
           }
         `}
         title={isListening ? 'Stop listening (or say "stop")' : 'Start voice commands'}

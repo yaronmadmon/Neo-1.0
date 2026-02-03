@@ -52,6 +52,9 @@ packages.zip
 coverage/
 .nyc_output/
 
+# User data (app storage)
+apps/server/data/
+
 # Misc
 *.pid
 *.seed

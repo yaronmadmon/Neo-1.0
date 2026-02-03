@@ -31,9 +31,11 @@ export function createAIProvider(config: AIProviderConfig): AIProvider {
 }
 
 export function createAIProviderFromEnv(): AIProvider {
-  const providerType = (process.env.AI_PROVIDER || 'mock') as AIProviderType;
+  const explicitProvider = process.env.AI_PROVIDER as AIProviderType | undefined;
+  const openaiKey = process.env.OPENAI_API_KEY;
 
-  if (providerType === 'openai' && process.env.OPENAI_API_KEY) {
+  // If explicit provider specified, use that
+  if (explicitProvider === 'openai' && process.env.OPENAI_API_KEY) {
     return createAIProvider({
       type: 'openai',
       openai: {
@@ -44,7 +46,7 @@ export function createAIProviderFromEnv(): AIProvider {
     });
   }
 
-  if (providerType === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+  if (explicitProvider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
     return createAIProvider({
       type: 'anthropic',
       anthropic: {
@@ -54,6 +56,41 @@ export function createAIProviderFromEnv(): AIProvider {
     });
   }
 
+  // Auto-detect from API keys if no explicit provider
+  if (!explicitProvider || explicitProvider === 'mock') {
+    // Check OpenAI key first
+    if (process.env.OPENAI_API_KEY) {
+      console.log('🤖 Auto-detected OpenAI API key, using OpenAI provider');
+      return createAIProvider({
+        type: 'openai',
+        openai: {
+          apiKey: process.env.OPENAI_API_KEY,
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          baseURL: process.env.OPENAI_BASE_URL,
+        },
+      });
+    }
+    
+    // Check Anthropic key
+    if (process.env.ANTHROPIC_API_KEY) {
+      console.log('🤖 Auto-detected Anthropic API key, using Anthropic provider');
+      return createAIProvider({
+        type: 'anthropic',
+        anthropic: {
+          apiKey: process.env.ANTHROPIC_API_KEY,
+          model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+        },
+      });
+    }
+  }
+
   // Fallback to mock
   return createAIProvider({ type: 'mock' });
+}
+
+/**
+ * Check if a real AI provider is available (not mock)
+ */
+export function hasRealAIProvider(): boolean {
+  return !!(process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY);
 }

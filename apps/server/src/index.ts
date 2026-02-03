@@ -1,11 +1,28 @@
+// Load environment variables FIRST
+import * as dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// Load .env from the server directory (both src and dist resolve to apps/server)
+const envPath = join(__dirname, '..', '.env');
+console.log('📁 Loading .env from:', envPath);
+const result = dotenv.config({ path: envPath });
+if (result.error) {
+  console.error('❌ Error loading .env:', result.error.message);
+} else {
+  console.log('✅ Loaded env vars:', Object.keys(result.parsed || {}).join(', '));
+}
+
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyRequest, type FastifyReply, type FastifyInstance } from 'fastify';
 import { AppCategory, AppPrivacyLevel, type App, type UserPreferences } from '@neo/contracts';
 import { UnifiedAppGenerator } from '@neo/app-generator';
-import { IntentProcessor, createAIProviderFromEnv } from '@neo/ai-engine';
+import { IntentProcessor, createAIProviderFromEnv, hasRealAIProvider } from '@neo/ai-engine';
 import { TemplateLibrary } from '@neo/templates';
 import { PromptSanitizer, ContentModerator, OutputValidator, SafetyOrchestrator } from '@neo/safety';
-import { DiscoveryHandler, MandatoryDiscoveryHandler } from '@neo/app-generator';
+import { DiscoveryHandler, MandatoryDiscoveryHandler, SmartDiscoveryHandlerWrapper, AIDiscoveryHandlerWrapper } from '@neo/app-generator';
 import { neoEngine, type MaterializedApp, type ProcessedIntent } from '../../../packages/core/blueprint-engine/dist/index.js';
 import { config } from './config.js';
 import { ensurePortAvailable, findAvailablePort } from './port-utils.js';
@@ -19,8 +36,12 @@ import { registerIntegrationsRoutes } from './integrations-routes.js';
 import { registerAppAnalysisRoutes } from './app-analysis-routes.js';
 import { registerAppRoutes } from './app-routes.js';
 import { registerDebugRoutes } from './debug-routes.js';
+import { registerBillingRoutes } from './billing-routes.js';
 import { addErrorToBuffer } from './utils/debug-helper.js';
 import { initSentry, captureException, setRequestContext, addBreadcrumb } from './utils/sentry.js';
+import { runMigrations, isDatabaseEnabled } from './services/database.js';
+import { appRepository } from './repositories/app-repository.js';
+import { getUserFromRequest } from './auth-routes.js';
 
 // Initialize Sentry FIRST (before anything else)
 initSentry();
@@ -80,6 +101,23 @@ const templates = new TemplateLibrary();
 const appGenerator = new UnifiedAppGenerator(intentProcessor, templates, safetyOrchestrator, aiProvider);
 const discoveryHandler = new DiscoveryHandler();
 const mandatoryDiscoveryHandler = new MandatoryDiscoveryHandler();
+const smartDiscoveryHandler = new SmartDiscoveryHandlerWrapper();
+
+// AI-powered discovery handler
+// Uses the same AI provider that's configured for app generation
+const aiProviderForDiscovery = {
+  complete: async (options: { prompt: string; systemPrompt?: string; maxTokens?: number; temperature?: number; timeout?: number }) => {
+    const response = await aiProvider.complete({
+      prompt: options.prompt,
+      systemPrompt: options.systemPrompt,
+      maxTokens: options.maxTokens || 1000,
+      temperature: options.temperature || 0.3,
+      timeout: options.timeout || 15000,
+    });
+    return typeof response === 'string' ? response : JSON.stringify(response);
+  }
+};
+const aiDiscoveryHandler = new AIDiscoveryHandlerWrapper(aiProviderForDiscovery);
 
 // In-memory app store (replace with database in production)
 const appStore = new Map<string, App>();
@@ -98,7 +136,8 @@ function determinePrivacyLevel(input: string, preferences?: UserPreferences): Ap
 }
 
 function materializedAppToSchema(app: MaterializedApp): App['schema'] {
-  return {
+  // Build base schema
+  const schema: App['schema'] = {
     schemaVersion: DEFAULT_SCHEMA_VERSION,
     pages: app.pages.map((page: MaterializedApp['pages'][number]) => ({
       id: page.id,
@@ -146,6 +185,64 @@ function materializedAppToSchema(app: MaterializedApp): App['schema'] {
       }),
     })),
   };
+  
+  // Add industry-specific metadata for frontend customization
+  // These are added as extended properties that the frontend can use
+  const extendedSchema = schema as App['schema'] & {
+    industry?: { id: string; name: string; dashboardType: string };
+    terminology?: Record<string, { primary: string; plural: string }>;
+    complexity?: string;
+    setupSummary?: string[];
+    welcomeMessage?: string;
+  };
+  
+  if (app.industry) {
+    extendedSchema.industry = app.industry;
+    
+    // Generate setup summary based on industry
+    const summaryItems: string[] = [];
+    summaryItems.push(`Set up as a ${app.industry.name || app.industry.id} business`);
+    
+    // Add complexity info if available
+    if (app.complexity === 'simple') {
+      summaryItems.push('Configured for solo use (streamlined interface)');
+    } else if (app.complexity === 'advanced') {
+      summaryItems.push('Configured for team use with full features');
+    } else {
+      summaryItems.push('Standard configuration for growing businesses');
+    }
+    
+    // Dashboard type info
+    const dashboardDescriptions: Record<string, string> = {
+      operations: 'Focus on day-to-day operations',
+      service: 'Focus on client service delivery',
+      sales: 'Focus on sales and revenue',
+      health: 'Focus on patient/member wellness',
+    };
+    if (app.industry.dashboardType && dashboardDescriptions[app.industry.dashboardType]) {
+      summaryItems.push(dashboardDescriptions[app.industry.dashboardType]);
+    }
+    
+    extendedSchema.setupSummary = summaryItems;
+  }
+  
+  if (app.terminology) {
+    extendedSchema.terminology = app.terminology;
+  }
+  
+  if (app.complexity) {
+    extendedSchema.complexity = app.complexity;
+  }
+  
+  if (app.setupSummary) {
+    extendedSchema.setupSummary = app.setupSummary;
+  }
+  
+  if (app.welcomeMessage) {
+    extendedSchema.welcomeMessage = app.welcomeMessage;
+  }
+  
+  return extendedSchema;
 }
 
 function materializedAppToTheme(app: MaterializedApp): App['theme'] {
@@ -539,8 +636,30 @@ server.post<{
         });
       }
 
-      // Store app
+      // Store app in memory (for immediate access)
       appStore.set(app.id, app);
+      
+      // Persist to storage (database or file-based)
+      try {
+        await appRepository.save({
+          id: app.id,
+          name: app.name,
+          description: app.description,
+          category: app.category,
+          schema: app.schema as Record<string, unknown>,
+          theme: app.theme as Record<string, unknown>,
+          data: app.data as Record<string, unknown>,
+          settings: app.settings as Record<string, unknown>,
+        }, preferences?.userId);
+        logger.info('App persisted to storage', { appId: app.id, useDatabase: isDatabaseEnabled() });
+      } catch (persistError: any) {
+        // Log but don't fail - app is still in memory
+        logger.warn('Failed to persist app to storage (will be in memory only)', {
+          appId: app.id,
+          error: persistError?.message,
+        });
+      }
+      
       logger.info('App created and stored', {
         appId: app.id,
         appName: app.name,
@@ -683,7 +802,40 @@ server.get<{ Params: { id: string } }>('/apps/:id', async (request: FastifyReque
       
       logger.debug('GET /apps/:id requested', { appId: id });
       
-      const app = appStore.get(id);
+      // First check memory store
+      let app = appStore.get(id);
+      
+      // If not in memory, check persistent storage (database or file)
+      if (!app) {
+        logger.debug('Checking persistent storage for app', { appId: id });
+        
+        try {
+          const storedApp = await appRepository.findById(id);
+          if (storedApp) {
+            // Convert to App type and cache in memory for future requests
+            app = {
+              id: storedApp.id,
+              name: storedApp.name,
+              description: storedApp.description,
+              category: (storedApp.category as any) || AppCategory.PERSONAL,
+              privacyLevel: AppPrivacyLevel.PRIVATE,
+              version: 1,
+              createdAt: storedApp.createdAt ? new Date(storedApp.createdAt) : new Date(),
+              updatedAt: storedApp.updatedAt ? new Date(storedApp.updatedAt) : new Date(),
+              createdBy: storedApp.userId || randomUUID(),
+              schema: storedApp.schema as any,
+              theme: storedApp.theme as any,
+              data: storedApp.data as any,
+              settings: storedApp.settings as any,
+            };
+            // Cache in memory store for faster subsequent access
+            appStore.set(id, app);
+            logger.info('App loaded from persistent storage and cached', { appId: id });
+          }
+        } catch (storageError: any) {
+          logger.warn('Persistent storage lookup failed', { appId: id, error: storageError?.message });
+        }
+      }
 
       if (!app) {
         logger.warn('App not found', { appId: id });
@@ -882,6 +1034,111 @@ server.get('/apps', async (request: FastifyRequest, reply: FastifyReply) => {
     count: apps.length,
   });
 });
+
+// List user's apps (authenticated users get their database apps)
+server.get('/api/apps', async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const user = await getUserFromRequest(request);
+    
+    if (user) {
+      // Authenticated user - fetch from database
+      const apps = await appRepository.findByUserId(user.id);
+      return reply.send({
+        success: true,
+        apps: apps.map((app) => ({
+          id: app.id,
+          name: app.name,
+          description: app.description,
+          category: app.category,
+          createdAt: app.createdAt,
+        })),
+        count: apps.length,
+      });
+    }
+    
+    // Guest user - return all apps from file storage
+    const allApps = await appRepository.findAll(50);
+    return reply.send({
+      success: true,
+      apps: allApps.map((app) => ({
+        id: app.id,
+        name: app.name,
+        description: app.description,
+        category: app.category,
+        createdAt: app.createdAt,
+      })),
+      count: allApps.length,
+    });
+  } catch (error: any) {
+    logger.error('Failed to list apps', error);
+    return reply.code(500).send({
+      success: false,
+      error: 'Failed to list apps',
+      message: error.message,
+    });
+  }
+});
+
+// Sync app from client (for logged-in users syncing localStorage apps)
+server.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+  '/api/apps/:id/sync',
+  async (request: FastifyRequest<{ Params: { id: string }; Body: Record<string, unknown> }>, reply: FastifyReply) => {
+    try {
+      const user = await getUserFromRequest(request);
+      
+      if (!user) {
+        return reply.code(401).send({
+          success: false,
+          error: 'Authentication required',
+        });
+      }
+      
+      const { id } = request.params;
+      const appData = request.body;
+      
+      // Check if app exists in memory store (was created this session)
+      const existingApp = appStore.get(id);
+      
+      if (existingApp) {
+        // Sync existing app to database
+        await appRepository.save({
+          id: existingApp.id,
+          name: existingApp.name,
+          description: existingApp.description,
+          category: existingApp.category,
+          schema: existingApp.schema as Record<string, unknown>,
+          theme: existingApp.theme as Record<string, unknown>,
+          data: existingApp.data as Record<string, unknown>,
+          settings: existingApp.settings as Record<string, unknown>,
+        }, user.id);
+      } else if (appData && appData.name) {
+        // Sync app from client data
+        await appRepository.save({
+          id,
+          name: String(appData.name),
+          description: appData.description ? String(appData.description) : undefined,
+          category: appData.category ? String(appData.category) : undefined,
+          schema: (appData.schema as Record<string, unknown>) || { pages: [], dataModels: [], flows: [] },
+          theme: appData.theme as Record<string, unknown>,
+          data: (appData.data as Record<string, unknown>) || {},
+          settings: (appData.settings as Record<string, unknown>) || {},
+        }, user.id);
+      }
+      
+      return reply.send({
+        success: true,
+        message: 'App synced successfully',
+      });
+    } catch (error: any) {
+      logger.error('Failed to sync app', error);
+      return reply.code(500).send({
+        success: false,
+        error: 'Failed to sync app',
+        message: error.message,
+      });
+    }
+  }
+);
 
 // CRUD endpoints for app data
 // Create record in a data model
@@ -1292,6 +1549,17 @@ process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
 // Start server
 const start = async () => {
   try {
+    // Run database migrations if database is configured
+    if (isDatabaseEnabled()) {
+      try {
+        await runMigrations();
+        logger.info('Database migrations complete');
+      } catch (err) {
+        logger.error('Database migration failed', err);
+        // Continue anyway - app can work without database
+      }
+    }
+    
     // Register routes
     await registerDatabaseRoutes(server);
     await registerAuthRoutes(server);
@@ -1299,6 +1567,7 @@ const start = async () => {
     await registerIntegrationsRoutes(server);
     await registerAppAnalysisRoutes(server);
     await registerPublishingRoutes(server);
+    await registerBillingRoutes(server);
     
     // Register debug routes (for AI assistant debugging)
     await registerDebugRoutes(server, {
@@ -1310,6 +1579,8 @@ const start = async () => {
     await registerAppRoutes(server, {
       discoveryHandler,
       mandatoryDiscoveryHandler,
+      smartDiscoveryHandler,
+      aiDiscoveryHandler, // AI-powered discovery with dynamic questions
       appGenerator,
       neoEngine,
       safetyOrchestrator,

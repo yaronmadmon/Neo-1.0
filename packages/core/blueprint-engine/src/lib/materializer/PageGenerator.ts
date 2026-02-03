@@ -33,6 +33,7 @@ export class PageGenerator {
     addPage(this.createPage('dashboard', `${input.kit.name} Dashboard`, 'dashboard'));
 
     // Behavior bundle pages
+    // FIX: Use entity names from kit instead of hardcoded bundle titles
     for (const moduleId of input.modules) {
       const bundle = BEHAVIOR_BUNDLES[moduleId];
       if (!bundle) continue;
@@ -40,11 +41,16 @@ export class PageGenerator {
       bundle.pageTitles.forEach((title, index) => {
         const kind = (bundle.pageKinds[index] || bundle.pageKinds[0]) as PageType;
         const entity = this.resolveEntityForTitle(title, input.entities, bundle.entities);
-        addPage(this.createPage(title, title, kind, entity?.id));
+        
+        // Use entity's actual name instead of hardcoded title
+        const pageTitle = entity?.pluralName || title;
+        const pageName = entity?.name || title.replace(/s$/, '');
+        
+        addPage(this.createPage(pageTitle, pageTitle, kind, entity?.id));
 
         if (kind === 'list' && entity && importantEntities.has(entity.id)) {
-          addPage(this.createPage(`${title} Details`, `${title} Details`, 'detail', entity.id, false));
-          addPage(this.createPage(`Add ${entity.name}`, `Add ${entity.name}`, 'form', entity.id, false));
+          addPage(this.createPage(`${pageTitle} Details`, `${pageTitle} Details`, 'detail', entity.id, false));
+          addPage(this.createPage(`Add ${pageName}`, `Add ${pageName}`, 'form', entity.id, false));
         }
       });
     }
@@ -120,38 +126,48 @@ export class PageGenerator {
 
   private resolveEntityForTitle(title: string, entities: EntityDef[], preferred?: string[]): EntityDef | undefined {
     const lower = title.toLowerCase();
+    
+    // First, check if any entity in the kit matches the preferred IDs
     if (preferred?.length) {
       const match = entities.find((entity) => preferred.includes(entity.id));
       if (match) return match;
     }
 
-    const overrides: Record<string, string> = {
-      technicians: 'staff',
-      staff: 'staff',
-      schedule: 'appointment',
-      calendar: 'appointment',
-      messaging: 'message',
-      messages: 'message',
-      materials: 'material',
-      inventory: 'material',
-      invoices: 'invoice',
-      quotes: 'quote',
-      jobs: 'job',
-      job: 'job',
-      pipeline: 'job',
-      timeline: 'job',
-      payments: 'payment',
-      documents: 'document',
-      gallery: 'gallery',
+    // Override mappings for specific page titles to entity types
+    const overrides: Record<string, string[]> = {
+      technicians: ['staff'],
+      staff: ['staff'],
+      schedule: ['appointment'],
+      calendar: ['appointment'],
+      messaging: ['message'],
+      messages: ['message'],
+      materials: ['material'],
+      inventory: ['material'],
+      invoices: ['invoice'],
+      quotes: ['quote'],
+      jobs: ['job'],
+      job: ['job'],
+      pipeline: ['job'],
+      timeline: ['job'],
+      payments: ['payment'],
+      documents: ['document'],
+      gallery: ['gallery'],
+      // CRM/client entities - check for industry-specific primary entities first
+      clients: ['guest', 'patient', 'tenant', 'member', 'student', 'homeowner', 'vehicleOwner', 'propertyOwner', 'careRecipient', 'customer', 'businessClient', 'client'],
+      client: ['guest', 'patient', 'tenant', 'member', 'student', 'homeowner', 'vehicleOwner', 'propertyOwner', 'careRecipient', 'customer', 'businessClient', 'client'],
     };
 
-    for (const [keyword, entityId] of Object.entries(overrides)) {
+    for (const [keyword, entityIds] of Object.entries(overrides)) {
       if (lower.includes(keyword)) {
-        const match = entities.find((entity) => entity.id === entityId);
-        if (match) return match;
+        // Try each possible entity ID in order of preference
+        for (const entityId of entityIds) {
+          const match = entities.find((entity) => entity.id === entityId);
+          if (match) return match;
+        }
       }
     }
 
+    // Fallback: match by entity name
     return entities.find((entity) => {
       return lower.includes(entity.name.toLowerCase()) || lower.includes(entity.pluralName.toLowerCase());
     });

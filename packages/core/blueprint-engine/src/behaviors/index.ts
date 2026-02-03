@@ -29,9 +29,9 @@ export const BEHAVIOR_BUNDLES: Record<string, BehaviorBundleSpec> = {
   messaging: bundle({
     id: 'messaging',
     name: 'Messaging Bundle',
-    entities: ['message'],
+    entities: ['message', 'conversation'],
     pageTitles: ['Messaging'],
-    pageKinds: ['list', 'detail', 'form'],
+    pageKinds: ['chat'],
     workflows: ['message-send'],
   }),
   payments: bundle({

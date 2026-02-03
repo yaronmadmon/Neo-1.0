@@ -4,6 +4,11 @@
  */
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { SchemaRenderer } from './components/SchemaRenderer.js';
+import { SidebarProvider, SidebarInset, SidebarTrigger } from './components/ui/sidebar.js';
+import { AppSidebar } from './components/AppSidebar.js';
+import { Separator } from './components/ui/separator.js';
+import { AppConfigurationProvider, type AppConfiguration } from './context/AppConfigurationContext.js';
+import { SetupSummary } from './components/SetupSummary.js';
 import type { App } from './types.js';
 
 interface PreviewProps {
@@ -47,6 +52,54 @@ export default function Preview({ id: propId }: PreviewProps) {
   const [notification, setNotification] = useState<{ message: string; type?: 'success' | 'error' } | null>(null);
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
+  const [showSetupSummary, setShowSetupSummary] = useState(false);
+
+  // Extract app configuration from schema if available
+  const appConfiguration = useMemo<Partial<AppConfiguration> | undefined>(() => {
+    if (!app?.schema) return undefined;
+    
+    const extSchema = app.schema as any;
+    
+    // Check if we have configuration in the schema
+    if (extSchema.configuration) {
+      return extSchema.configuration;
+    }
+    
+    // Build basic configuration from schema metadata
+    const config: Partial<AppConfiguration> = {};
+    
+    // Extract kit/industry info
+    if (extSchema.industry?.id) {
+      config.kitId = extSchema.industry.id;
+    }
+    
+    // Extract complexity from schema
+    if (extSchema.complexity) {
+      config.complexity = extSchema.complexity;
+    }
+    
+    // Extract terminology if available
+    if (extSchema.terminology) {
+      config.terminology = extSchema.terminology;
+    }
+    
+    // Build sample data context
+    config.sampleData = {
+      businessName: cleanText(app.name) || 'Your Business',
+      serviceTypes: [],
+      locationStyle: 'mixed',
+      includeSampleData: true,
+    };
+    
+    // Check for setup summary
+    if (extSchema.setupSummary) {
+      config.setupSummary = extSchema.setupSummary;
+      // Show setup summary on first load if we have one
+      setShowSetupSummary(true);
+    }
+    
+    return Object.keys(config).length > 0 ? config : undefined;
+  }, [app]);
 
   const navigate = (path: string) => {
     window.history.pushState({}, '', path);
@@ -90,6 +143,7 @@ export default function Preview({ id: propId }: PreviewProps) {
       targetPageId?: string;
       message?: string;
       componentId?: string; // For refresh_list
+      config?: Record<string, unknown>; // For navigate and other actions with config
     },
     formData?: Record<string, unknown>
   ) => {
@@ -204,9 +258,13 @@ export default function Preview({ id: propId }: PreviewProps) {
         }
 
         case 'navigate': {
-          if (action.targetPageId) {
-            // For now, just log - page navigation can be enhanced later
-            console.log('🧭 Navigate to page:', action.targetPageId);
+          // Get pageId from either location (flows use config.pageId)
+          const pageId = action.targetPageId || (action.config as any)?.pageId;
+          if (pageId) {
+            console.log('🧭 Navigate to page:', pageId);
+            setCurrentPageId(pageId);
+          } else {
+            console.warn('⚠️ Navigate action missing pageId');
           }
           break;
         }
@@ -250,13 +308,9 @@ export default function Preview({ id: propId }: PreviewProps) {
     console.log('🎯 Action received:', { componentId, eventType, formData });
     console.log('🔍 Available flows:', app?.schema?.flows);
     
-    if (!app?.schema?.flows) {
-      console.warn('⚠️ No flows defined in app schema');
-      return;
-    }
-
     // Find flows that match this trigger
-    const matchingFlows = app.schema.flows.filter((flow: any) => {
+    const flows = app?.schema?.flows || [];
+    const matchingFlows = flows.filter((flow: any) => {
       const matches = flow.enabled !== false && 
         flow.trigger.type === eventType && 
         (!flow.trigger.componentId || flow.trigger.componentId === componentId);
@@ -275,20 +329,179 @@ export default function Preview({ id: propId }: PreviewProps) {
 
     console.log('✅ Matching flows:', matchingFlows.length, matchingFlows);
 
-    if (matchingFlows.length === 0) {
-      console.warn('⚠️ No matching flows found for:', { componentId, eventType });
-    }
-
-    // Execute all matching flows
-    for (const flow of matchingFlows as Array<{ id: string; name?: string; actions?: Array<{ type: string; modelId?: string; model?: string; recordId?: string; data?: Record<string, unknown>; targetPageId?: string; message?: string; componentId?: string }> }>) {
-      console.log('▶️ Executing flow:', flow.id, flow.name);
-      if (flow.actions && Array.isArray(flow.actions)) {
-        for (const action of flow.actions) {
-          await dispatchAction(action, formData);
+    // Execute matching flows if found
+    if (matchingFlows.length > 0) {
+      for (const flow of matchingFlows as Array<{ id: string; name?: string; actions?: Array<{ type: string; modelId?: string; model?: string; recordId?: string; data?: Record<string, unknown>; targetPageId?: string; message?: string; componentId?: string; config?: Record<string, unknown> }> }>) {
+        console.log('▶️ Executing flow:', flow.id, flow.name);
+        if (flow.actions && Array.isArray(flow.actions)) {
+          for (const action of flow.actions) {
+            await dispatchAction(action, formData);
+          }
         }
       }
+      return;
     }
-  }, [app, dispatchAction]);
+
+    // ============================================================
+    // FALLBACK: Handle common button patterns without explicit flows
+    // This ensures buttons work even if flows weren't generated correctly
+    // ============================================================
+    console.log('🔄 No matching flows, trying fallback handlers for:', componentId);
+    
+    const componentIdLower = componentId.toLowerCase();
+    
+    // Helper to find entity from current page or button ID
+    const inferEntityFromContext = (): string | null => {
+      // Try to get entity from current page
+      const currentPageData = app?.schema?.pages?.find((p: any) => p.id === currentPageId) as { entity?: string } | undefined;
+      if (currentPageData?.entity) return currentPageData.entity;
+      
+      // Try to extract from data models
+      const dataModels = (app?.schema?.dataModels || []) as Array<{ id: string; name: string }>;
+      if (dataModels.length === 1) return dataModels[0].id;
+      
+      // Try to extract from component ID patterns
+      for (const model of dataModels) {
+        if (componentIdLower.includes(model.id.toLowerCase())) {
+          return model.id;
+        }
+      }
+      
+      return dataModels[0]?.id || 'item';
+    };
+    
+    // Handle "Add" buttons - navigate to form page
+    // Matches: "add-btn", "customer-add-btn", "quick-add", "add-guest", "addCustomer", etc.
+    const isAddButton = componentIdLower.includes('-add-btn') || 
+                        componentIdLower.includes('add-') || 
+                        componentIdLower.includes('-add') ||
+                        componentIdLower === 'add' ||
+                        /^(quick[-_]?)?add/i.test(componentId);
+    
+    if (isAddButton) {
+      // Get list of valid entity IDs from data models
+      const dataModels = (app?.schema?.dataModels || []) as Array<{ id: string; name: string }>;
+      const validEntityIds = new Set(dataModels.map(m => m.id.toLowerCase()));
+      
+      // Try to extract entity from button ID
+      let entityId = componentId
+        .replace(/-add-btn$/i, '')
+        .replace(/^add-/i, '')
+        .replace(/-add$/i, '')
+        .replace(/^quick[-_]?add[-_]?/i, '')
+        .replace(/add$/i, '')
+        .trim();
+      
+      // Check if extracted entity is valid, otherwise infer from context
+      // Also handle generic names like "quick", "new", "create", etc.
+      const genericNames = ['quick', 'new', 'create', 'fast', ''];
+      if (!entityId || genericNames.includes(entityId.toLowerCase()) || !validEntityIds.has(entityId.toLowerCase())) {
+        entityId = inferEntityFromContext() || 'item';
+        console.log('🔄 Entity inferred from context:', entityId);
+      }
+      
+      const formPageId = `${entityId}-form`;
+      console.log('🔄 Fallback: Add button → looking for form page:', formPageId, 'entity:', entityId);
+      
+      // Check if form page exists - try multiple patterns
+      const formPage = app?.schema?.pages?.find((p: any) => 
+        p.id === formPageId || 
+        p.id === `${entityId}s-form` ||
+        p.id === `add-${entityId}` ||
+        (p.type === 'form' && p.entity === entityId) ||
+        (p.type === 'form' && p.id.includes(entityId))
+      ) || app?.schema?.pages?.find((p: any) => p.type === 'form');  // Final fallback to any form page
+      
+      if (formPage) {
+        console.log('🔄 Found form page:', formPage.id);
+        setCurrentPageId(formPage.id);
+        const entityName = entityId.charAt(0).toUpperCase() + entityId.slice(1);
+        setNotification({ message: `Opening ${entityName} form...`, type: 'success' });
+        setTimeout(() => setNotification(null), 2000);
+      } else {
+        // Show notification that we're trying to add
+        const entityName = entityId.charAt(0).toUpperCase() + entityId.slice(1);
+        setNotification({ message: `Add ${entityName} (form page not found)`, type: 'success' });
+        setTimeout(() => setNotification(null), 2000);
+      }
+      return;
+    }
+    
+    // Handle "Edit" buttons - navigate to form page in edit mode
+    if (componentIdLower.includes('-edit-btn') || componentIdLower.includes('edit-')) {
+      const entityId = componentId.replace(/-edit-btn$/i, '').replace(/^edit-/i, '');
+      console.log('🔄 Fallback: Edit button for:', entityId);
+      setNotification({ message: `Edit ${entityId}`, type: 'success' });
+      setTimeout(() => setNotification(null), 2000);
+      return;
+    }
+    
+    // Handle "View" buttons - navigate to detail page
+    if (componentIdLower.includes('-view-btn') || componentIdLower.includes('view-')) {
+      const entityId = componentId.replace(/-view-btn$/i, '').replace(/^view-/i, '');
+      const detailPageId = `${entityId}-detail`;
+      console.log('🔄 Fallback: View button → navigating to detail:', detailPageId);
+      
+      const detailPage = app?.schema?.pages?.find((p: any) => 
+        p.id === detailPageId || p.type === 'detail' && p.id.includes(entityId)
+      );
+      
+      if (detailPage) {
+        setCurrentPageId(detailPage.id);
+      } else {
+        setNotification({ message: `View ${entityId} details`, type: 'success' });
+        setTimeout(() => setNotification(null), 2000);
+      }
+      return;
+    }
+    
+    // Handle "Delete" buttons
+    if (componentIdLower.includes('-delete-btn') || componentIdLower.includes('delete-')) {
+      const entityId = componentId.replace(/-delete-btn$/i, '').replace(/^delete-/i, '');
+      console.log('🔄 Fallback: Delete button for:', entityId);
+      setNotification({ message: `Delete ${entityId}? (Not implemented in preview)`, type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+    
+    // Handle navigation buttons (back, nav-)
+    if (componentIdLower.includes('nav-') && componentIdLower.includes('-list')) {
+      const entityId = componentId.replace(/^nav-/i, '').replace(/-list$/i, '');
+      const listPageId = `${entityId}-list`;
+      console.log('🔄 Fallback: Nav button → navigating to list:', listPageId);
+      
+      const listPage = app?.schema?.pages?.find((p: any) => 
+        p.id === listPageId || p.id === `${entityId}s-list` || (p.type === 'list' && p.id.includes(entityId))
+      );
+      
+      if (listPage) {
+        setCurrentPageId(listPage.id);
+      }
+      return;
+    }
+    
+    // Handle form submissions with fallback
+    if (eventType === 'form_submit' && formData) {
+      // Extract entity from form ID (e.g., "customer-form" → "customer")
+      const entityId = componentId.replace(/-form$/i, '');
+      console.log('🔄 Fallback: Form submit for entity:', entityId, 'with data:', formData);
+      
+      // Try to create record
+      await dispatchAction({
+        type: 'create_record',
+        modelId: entityId,
+        model: entityId,
+        data: formData,
+        message: 'Record saved successfully',
+      }, formData);
+      return;
+    }
+    
+    // Generic fallback - just log the action
+    console.warn('⚠️ No handler found for:', { componentId, eventType });
+    setNotification({ message: `Button "${componentId}" clicked`, type: 'success' });
+    setTimeout(() => setNotification(null), 2000);
+  }, [app, dispatchAction, currentPageId]);
 
   useEffect(() => {
     const currentId = propId || getIdFromUrl();
@@ -372,54 +585,15 @@ export default function Preview({ id: propId }: PreviewProps) {
     fetchApp();
   }, [id]);
 
-  useEffect(() => {
-    if (app?.schema?.pages?.length) {
-      setCurrentPageId(app.schema.pages[0].id);
-    }
+  // Derive pages and search query early so they can be used in hooks
+  const pages = useMemo(() => {
+    return Array.isArray(app?.schema?.pages) ? app.schema.pages : [];
   }, [app?.schema?.pages]);
-
-  useEffect(() => {
-    if (filteredPages.length === 0) {
-      return;
-    }
-    const hasCurrent = filteredPages.some((page) => page.id === currentPageId);
-    if (!hasCurrent) {
-      setCurrentPageId(filteredPages[0].id);
-    }
-  }, [filteredPages, currentPageId]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading app preview...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !app) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50">
-        <div className="text-center bg-white p-8 rounded-lg shadow-lg max-w-md">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
-          <p className="text-gray-700 mb-6">{error || 'App not found'}</p>
-          <button
-            onClick={() => navigate('/')}
-            className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            ← Back to Neo
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const pages = Array.isArray(app.schema?.pages) ? app.schema.pages : [];
+  
   const normalizedQuery = globalSearch.trim().toLowerCase();
 
-  const valueMatchesQuery = (value: unknown, depth: number = 0): boolean => {
+  // Helper functions for filtering (defined as callbacks to be stable)
+  const valueMatchesQuery = useCallback((value: unknown, depth: number = 0): boolean => {
     if (!normalizedQuery) return true;
     if (value === null || value === undefined) return false;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -434,9 +608,9 @@ export default function Preview({ id: propId }: PreviewProps) {
       );
     }
     return false;
-  };
+  }, [normalizedQuery]);
 
-  const filterComponentsByQuery = (components: Array<any>): Array<any> => {
+  const filterComponentsByQuery = useCallback((components: Array<any>): Array<any> => {
     if (!normalizedQuery) return components;
     return components
       .map((component) => {
@@ -451,21 +625,20 @@ export default function Preview({ id: propId }: PreviewProps) {
         return null;
       })
       .filter((component) => component !== null);
-  };
+  }, [normalizedQuery, valueMatchesQuery]);
 
-  const filterDataByQuery = (data: Record<string, unknown>): Record<string, unknown> => {
+  const filterDataByQuery = useCallback((data: Record<string, unknown[]>): Record<string, unknown[]> => {
     if (!normalizedQuery) return data;
-    const filtered: Record<string, unknown> = {};
+    const filtered: Record<string, unknown[]> = {};
     Object.entries(data).forEach(([key, value]) => {
       if (Array.isArray(value)) {
         filtered[key] = value.filter((row) => valueMatchesQuery(row));
-      } else if (valueMatchesQuery(value)) {
-        filtered[key] = value;
       }
     });
     return filtered;
-  };
+  }, [normalizedQuery, valueMatchesQuery]);
 
+  // Calculate filteredPages BEFORE the useEffect that uses it
   const filteredPages = useMemo(() => {
     if (!normalizedQuery) return pages;
     return pages
@@ -478,11 +651,111 @@ export default function Preview({ id: propId }: PreviewProps) {
           ? { ...page, components: filteredComponents }
           : null;
       })
-      .filter((page) => page !== null);
-  }, [normalizedQuery, pages]);
+      .filter((page): page is NonNullable<typeof page> => page !== null);
+  }, [normalizedQuery, pages, filterComponentsByQuery, valueMatchesQuery]);
 
+  // Calculate filteredData - must be before early returns to maintain hook order
+  const filteredData = useMemo(() => {
+    return filterDataByQuery((app?.data || {}) as Record<string, unknown[]>);
+  }, [app?.data, filterDataByQuery]);
+
+  useEffect(() => {
+    if (app?.schema?.pages?.length) {
+      setCurrentPageId(app.schema.pages[0].id);
+    }
+  }, [app?.schema?.pages]);
+
+  useEffect(() => {
+    if (filteredPages.length === 0) {
+      return;
+    }
+    const hasCurrent = filteredPages.some((page) => page.id === currentPageId);
+    if (!hasCurrent && filteredPages[0]) {
+      setCurrentPageId(filteredPages[0].id);
+    }
+  }, [filteredPages, currentPageId]);
+
+  // Handle card action events for internal navigation
+  useEffect(() => {
+    const handleCardAction = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        action: string;
+        itemId: string;
+        entityId: string;
+        targetPage?: string;
+        targetPageParams?: Record<string, unknown>;
+      }>;
+      
+      const { action, itemId, entityId, targetPage } = customEvent.detail;
+      console.log('📋 Card action received in Preview:', { action, itemId, entityId, targetPage });
+      
+      // Handle View/Edit actions by navigating to detail page (if it exists)
+      if (action.toLowerCase() === 'view' || action.toLowerCase() === 'edit') {
+        // Try to find a detail page for this entity
+        const detailPageId = targetPage || `${entityId}-detail`;
+        const detailPage = app?.schema?.pages?.find(p => 
+          p.id === detailPageId || 
+          p.id === `${entityId}s-detail` ||
+          ((p as any).type === 'detail' && p.id.includes(entityId))
+        );
+        
+        if (detailPage) {
+          console.log('📄 Navigating to detail page:', detailPage.id);
+          setCurrentPageId(detailPage.id);
+          // Store the selected item ID for the detail page to use
+          // This would typically be passed via context or URL params
+        } else {
+          // No detail page found - show a notification or modal instead
+          console.log('ℹ️ No detail page found for', entityId, '- showing item info');
+          setNotification({ 
+            message: `Viewing ${entityId} #${itemId}`, 
+            type: 'success' 
+          });
+          setTimeout(() => setNotification(null), 2000);
+        }
+      }
+    };
+    
+    window.addEventListener('neo-card-action', handleCardAction);
+    
+    return () => {
+      window.removeEventListener('neo-card-action', handleCardAction);
+    };
+  }, [app?.schema?.pages]);
+
+  // Early returns must come AFTER all hooks
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-foreground mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading app preview...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !app) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center bg-card p-8 rounded-lg border max-w-md">
+          <h1 className="text-2xl font-bold text-destructive mb-4">Error</h1>
+          <p className="text-muted-foreground mb-6">{error || 'App not found'}</p>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="bg-primary text-primary-foreground px-6 py-2 rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            ← Back to Neo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Find current page with safe fallback for empty arrays
   const currentPage =
-    filteredPages.find((page) => page.id === currentPageId) || filteredPages[0];
+    filteredPages.find((page) => page.id === currentPageId) || filteredPages[0] || null;
   
   // Transform components to ComponentInstance format with proper typing
   const transformComponent = (comp: any): {
@@ -505,10 +778,6 @@ export default function Preview({ id: propId }: PreviewProps) {
     ? currentPage.components.map(transformComponent)
     : [];
 
-  const filteredData = useMemo(() => {
-    return filterDataByQuery((app.data || {}) as Record<string, unknown>);
-  }, [app.data, normalizedQuery]);
-
   // Debug: Log component instances
   console.log('🔧 Current page:', currentPage);
   console.log('🎨 Component instances:', componentInstances);
@@ -519,81 +788,161 @@ export default function Preview({ id: propId }: PreviewProps) {
     console.warn('⚠️ No components found in page:', currentPage);
   }
 
+  // Get shell configuration for dynamic layout (with type assertion for extended schema)
+  const extendedSchema = app.schema as any;
+  const shell = extendedSchema?.shell || {
+    id: 'dashboard-02',
+    name: 'Standard Business Shell',
+    dashboardType: 'operations',
+    layout: {
+      sidebarPosition: 'left',
+      sidebarStyle: 'full',
+      headerStyle: 'standard',
+      contentWidth: 'contained',
+    },
+    features: {
+      showQuickActions: true,
+      showRecentActivity: true,
+      showSearch: true,
+      showUserMenu: true,
+      showNotifications: false,
+    },
+  };
+
+  const industry = extendedSchema?.industry as { id: string; name: string; dashboardType: string } | undefined;
+
+  // Dynamic layout classes based on shell configuration
+  const getSidebarClasses = () => {
+    const base = 'hidden md:block border-gray-200 bg-white min-h-screen';
+    const width = shell.layout?.sidebarStyle === 'compact' ? 'w-56' : 
+                  shell.layout?.sidebarStyle === 'icons-only' ? 'w-16' : 'w-64';
+    const border = shell.layout?.sidebarPosition === 'right' ? 'border-l' : 'border-r';
+    return `${base} ${width} ${border}`;
+  };
+
+  const getContentWidthClasses = () => {
+    switch (shell.layout?.contentWidth) {
+      case 'full': return 'w-full';
+      case 'narrow': return 'max-w-4xl mx-auto';
+      default: return 'max-w-6xl mx-auto';
+    }
+  };
+
+  const getHeaderClasses = () => {
+    const base = 'bg-white border-b border-gray-200';
+    switch (shell.layout?.headerStyle) {
+      case 'minimal': return `${base} px-4 py-2`;
+      case 'prominent': return `${base} px-6 py-5 shadow-sm`;
+      default: return `${base} px-6 py-4`;
+    }
+  };
+
+  // Transform pages for AppSidebar
+  const sidebarPages = filteredPages.map(page => ({
+    id: page.id,
+    name: page.name,
+    route: page.route,
+    type: (page as any).type || 'list',
+  }));
+
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{cleanText(app.name)}</h1>
-            {app.description && cleanText(app.description) && (
-              <p className="text-sm text-gray-600 mt-1">{cleanText(app.description)}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden md:block w-64">
-              <label className="sr-only" htmlFor="preview-global-search">
-                Search app
-              </label>
-              <div className="relative">
-                <input
-                  id="preview-global-search"
-                  value={globalSearch}
-                  onChange={(e) => setGlobalSearch(e.target.value)}
-                  placeholder="Search this app"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                />
-                <span className="pointer-events-none absolute right-2 top-2 text-[10px] uppercase tracking-wide text-gray-400">Global</span>
-              </div>
+    <AppConfigurationProvider configuration={appConfiguration}>
+      {/* Setup Summary Overlay (shown on first load if configured) */}
+      {showSetupSummary && appConfiguration?.setupSummary && (
+        <SetupSummary
+          summary={appConfiguration.setupSummary}
+          overlay
+          onProceed={() => setShowSetupSummary(false)}
+          onAdjust={() => {
+            setShowSetupSummary(false);
+            navigate(`/studio/${id}`);
+          }}
+        />
+      )}
+      
+      <SidebarProvider>
+        <AppSidebar
+          appName={cleanText(app.name)}
+          pages={sidebarPages}
+          currentPageId={currentPageId}
+          onPageSelect={setCurrentPageId}
+          onNavigateHome={() => navigate('/')}
+          showUserMenu={shell.features?.showUserMenu}
+        />
+        <SidebarInset>
+        {/* Header */}
+        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+          <div className="flex flex-1 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h1 className="font-semibold text-foreground text-sm">
+                {currentPage?.name || cleanText(app.name)}
+              </h1>
             </div>
-            <button
-              onClick={() => navigate(`/studio/${id}`)}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-colors font-medium text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              Open in Studio
-            </button>
-            <button
-              onClick={() => navigate('/')}
-              className="text-purple-600 hover:text-purple-700 font-medium"
-            >
-              ← Back to Neo
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-6xl mx-auto flex">
-        {/* Sidebar */}
-        <aside className="hidden md:block w-64 border-r border-gray-200 bg-white min-h-screen">
-          <div className="p-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Pages</h2>
-            <nav className="space-y-1">
-              {filteredPages.map((page) => (
-                <button
-                  key={page.id}
-                  onClick={() => setCurrentPageId(page.id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                    page.id === currentPage?.id
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+            <div className="flex items-center gap-2">
+              {/* Search */}
+              {shell.features?.showSearch && (
+                <div className="hidden md:block w-64">
+                  <label className="sr-only" htmlFor="preview-global-search">
+                    Search app
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="preview-global-search"
+                      value={globalSearch}
+                      onChange={(e) => setGlobalSearch(e.target.value)}
+                      placeholder="Search..."
+                      className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <svg className="absolute right-3 top-2 h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+              )}
+              
+              {/* Notifications */}
+              {shell.features?.showNotifications && (
+                <button 
+                  type="button"
+                  className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground"
                 >
-                  {page.name}
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-destructive"></span>
                 </button>
-              ))}
-            </nav>
-          </div>
-        </aside>
+              )}
 
-        <main className="flex-1">
+              <button
+                type="button"
+                onClick={() => navigate(`/studio/${id}`)}
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 transition-colors"
+              >
+                <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                ← Back
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Main content */}
+        <div className="flex-1 bg-muted/40 min-h-[calc(100vh-3.5rem)]">
           {/* Mobile page selector */}
-          <div className="md:hidden px-6 py-4 bg-white border-b border-gray-200">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Current Page</label>
+          <div className="md:hidden px-4 py-3 bg-background border-b">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Current Page</label>
             <select
-              className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={currentPage?.id || ''}
               onChange={(e) => setCurrentPageId(e.target.value)}
             >
@@ -603,7 +952,7 @@ export default function Preview({ id: propId }: PreviewProps) {
                 </option>
               ))}
             </select>
-            <label className="mt-4 block text-xs font-semibold text-gray-500 uppercase tracking-wide" htmlFor="preview-global-search-mobile">
+            <label className="mt-4 block text-xs font-semibold text-muted-foreground uppercase tracking-wide" htmlFor="preview-global-search-mobile">
               Global Search
             </label>
             <input
@@ -611,28 +960,31 @@ export default function Preview({ id: propId }: PreviewProps) {
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
               placeholder="Search this app"
-              className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
-      {/* Notification */}
-      {notification && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
-          notification.type === 'error' ? 'bg-red-500' : 'bg-green-500'
-        } text-white max-w-md`}>
-          {notification.message}
-        </div>
-      )}
+          {/* Notification */}
+          {notification && (
+            <div className={`fixed top-16 right-4 z-50 p-4 rounded-md border shadow-sm max-w-md ${
+              notification.type === 'error' 
+                ? 'bg-destructive text-destructive-foreground border-destructive' 
+                : 'bg-background text-foreground border-border'
+            }`}>
+              {notification.message}
+            </div>
+          )}
 
-      {/* Render the app schema */}
-            <SchemaRenderer
+          {/* Render the app schema */}
+          <SchemaRenderer
             components={componentInstances}
             data={filteredData}
             theme={app.theme}
             onAction={handleComponentAction}
           />
-        </main>
-      </div>
-    </div>
+        </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </AppConfigurationProvider>
   );
 }

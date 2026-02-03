@@ -9,10 +9,14 @@ import type { ProcessedIntent } from '@neo/blueprint-engine';
 import { logger } from './utils/logger.js';
 import { captureException, setRequestContext, addBreadcrumb } from './utils/sentry.js';
 import { randomUUID } from 'node:crypto';
+import { appRepository } from './repositories/app-repository.js';
+import { isDatabaseEnabled } from './services/database.js';
 
 // These will be injected when routes are registered
 let discoveryHandler: any;
 let mandatoryDiscoveryHandler: any;
+let smartDiscoveryHandler: any;
+let aiDiscoveryHandler: any; // AI-powered discovery with dynamic questions
 let appGenerator: any;
 let neoEngine: any;
 let safetyOrchestrator: any;
@@ -31,6 +35,8 @@ export async function registerAppRoutes(
   dependencies: {
     discoveryHandler: any;
     mandatoryDiscoveryHandler: any;
+    smartDiscoveryHandler?: any;
+    aiDiscoveryHandler?: any; // AI-powered discovery
     appGenerator: any;
     neoEngine: any;
     safetyOrchestrator: any;
@@ -45,6 +51,8 @@ export async function registerAppRoutes(
   // Inject dependencies
   discoveryHandler = dependencies.discoveryHandler;
   mandatoryDiscoveryHandler = dependencies.mandatoryDiscoveryHandler;
+  smartDiscoveryHandler = dependencies.smartDiscoveryHandler;
+  aiDiscoveryHandler = dependencies.aiDiscoveryHandler;
   appGenerator = dependencies.appGenerator;
   neoEngine = dependencies.neoEngine;
   safetyOrchestrator = dependencies.safetyOrchestrator;
@@ -132,12 +140,17 @@ export async function registerAppRoutes(
         // If state and answers provided, continue discovery
         // Use the defaults we set above - state and answers are never null/undefined
         if (state && Object.keys(state).length > 0 && answers && Object.keys(answers).length > 0) {
-          console.log('Continuing discovery with state:', JSON.stringify(state, null, 2));
+          console.log('Continuing AI-powered discovery with state:', JSON.stringify(state, null, 2));
           console.log('Answers:', JSON.stringify(answers, null, 2));
           
+          // Priority: AI discovery > smart discovery > mandatory
+          const useAI = !!aiDiscoveryHandler;
+          const handler = aiDiscoveryHandler || smartDiscoveryHandler || mandatoryDiscoveryHandler;
+          console.log('Using handler:', useAI ? 'AI-POWERED' : (smartDiscoveryHandler ? 'SMART' : 'MANDATORY'));
+          
           // Ensure handler exists before calling
-          if (!mandatoryDiscoveryHandler) {
-            console.error('mandatoryDiscoveryHandler is not initialized!');
+          if (!handler) {
+            console.error('No discovery handler is initialized!');
             return reply.code(200).type('application/json').send({
               needsClarification: true,
               questions: [],
@@ -150,8 +163,15 @@ export async function registerAppRoutes(
           
           let result;
           try {
-            result = mandatoryDiscoveryHandler.continueDiscovery(state, answers);
-            console.log('Continue discovery result type:', typeof result);
+            // AI handler is async, others are sync
+            result = useAI 
+              ? await handler.continueDiscovery(state, answers)
+              : handler.continueDiscovery(state, answers);
+            console.log('Continue discovery result:', {
+              needsClarification: result?.needsClarification,
+              hasAppConfig: !!result?.appConfig,
+              questionCount: result?.questions?.length,
+            });
           } catch (handlerError: any) {
             console.error('Error calling continueDiscovery:', handlerError);
             console.error('Handler error stack:', handlerError?.stack);
@@ -170,17 +190,19 @@ export async function registerAppRoutes(
             });
           }
           
-          // Ensure state is serializable
+          // Ensure state is serializable (include smart discovery fields)
           const safeState = result.state || { currentStep: 0, answers: {} };
-          const serializableState: {
-            currentStep: number;
-            context?: 'business' | 'home';
-            answers: Record<string, unknown>;
-          } = {
+          const serializableState: Record<string, unknown> = {
             currentStep: Number(safeState.currentStep) || 0,
             answers: typeof safeState.answers === 'object' && safeState.answers !== null 
               ? { ...safeState.answers } 
-              : {}
+              : {},
+            // Include smart discovery state fields
+            confidence: safeState.confidence,
+            detectedIndustry: safeState.detectedIndustry,
+            detectedIntent: safeState.detectedIntent,
+            originalInput: safeState.originalInput,
+            questionsAsked: safeState.questionsAsked,
           };
           
           // Only include context if it exists and is valid
@@ -217,12 +239,16 @@ export async function registerAppRoutes(
           });
         }
 
-        // Start discovery - always returns questions (gate question)
-        console.log('Starting discovery with input:', input?.substring(0, 50));
-        console.log('mandatoryDiscoveryHandler:', mandatoryDiscoveryHandler ? 'exists' : 'MISSING');
+        // Start discovery - use AI-powered discovery for dynamic questions
+        console.log('Starting AI-powered discovery with input:', input?.substring(0, 50));
         
-        if (!mandatoryDiscoveryHandler) {
-          console.error('mandatoryDiscoveryHandler is not initialized!');
+        // Priority: AI discovery > smart discovery > mandatory
+        const useAI = !!aiDiscoveryHandler;
+        const handler = aiDiscoveryHandler || smartDiscoveryHandler || mandatoryDiscoveryHandler;
+        console.log('Using handler:', useAI ? 'AI-POWERED' : (smartDiscoveryHandler ? 'SMART' : 'MANDATORY'));
+        
+        if (!handler) {
+          console.error('No discovery handler is initialized!');
           return reply.code(200).type('application/json').send({
             needsClarification: true,
             questions: [],
@@ -235,14 +261,22 @@ export async function registerAppRoutes(
         
         let result;
         try {
-          result = mandatoryDiscoveryHandler.startDiscovery(input);
-          console.log('Discovery result type:', typeof result);
-          console.log('Discovery result has questions:', !!result?.questions);
-          console.log('Discovery result has state:', !!result?.state);
+          // AI handler is async, others are sync
+          result = useAI 
+            ? await handler.startDiscovery(input)
+            : handler.startDiscovery(input);
+          console.log('Discovery result:', {
+            needsClarification: result?.needsClarification,
+            action: result?.action,
+            hasQuestions: !!result?.questions?.length,
+            hasAppConfig: !!result?.appConfig,
+            confidence: result?.state?.confidence,
+            aiInterpretation: result?.state?.aiInterpretation,
+          });
         } catch (handlerError: any) {
           console.error('Error calling startDiscovery:', handlerError);
           console.error('Handler error stack:', handlerError?.stack);
-          throw handlerError; // Re-throw to be caught by outer catch
+          throw handlerError;
         }
         
         // Validate result structure
@@ -258,20 +292,39 @@ export async function registerAppRoutes(
           });
         }
         
+        // Handle auto_build action (high confidence) - proceed directly to app creation
+        if (result.action === 'auto_build' && result.appConfig) {
+          console.log('HIGH CONFIDENCE - Auto-building app');
+          return reply.code(200).type('application/json').send({
+            needsClarification: false,
+            appConfig: result.appConfig,
+            state: result.state,
+            action: 'auto_build',
+          });
+        }
+        
+        // Handle confirm action (medium-high confidence) - show confirmation
+        if (result.action === 'confirm' && result.appConfig) {
+          console.log('MEDIUM-HIGH CONFIDENCE - Requesting confirmation');
+          // Still return as needsClarification so UI can show confirmation
+        }
+        
         // Ensure state and questions are properly structured
         const safeState = result.state || { currentStep: 0, answers: {} };
         const safeQuestions = Array.isArray(result.questions) ? result.questions : [];
         
-        // Ensure state is serializable (remove any non-serializable properties)
-        const serializableState: {
-          currentStep: number;
-          context?: 'business' | 'home';
-          answers: Record<string, unknown>;
-        } = {
+        // Ensure state is serializable
+        const serializableState: Record<string, unknown> = {
           currentStep: Number(safeState.currentStep) || 0,
           answers: typeof safeState.answers === 'object' && safeState.answers !== null 
             ? { ...safeState.answers } 
-            : {}
+            : {},
+          // Include smart discovery state fields
+          confidence: safeState.confidence,
+          detectedIndustry: safeState.detectedIndustry,
+          detectedIntent: safeState.detectedIntent,
+          originalInput: safeState.originalInput,
+          questionsAsked: safeState.questionsAsked,
         };
         
         // Only include context if it exists and is valid
@@ -279,13 +332,19 @@ export async function registerAppRoutes(
           serializableState.context = safeState.context;
         }
         
-        console.log('Sending discovery response with', safeQuestions.length, 'questions');
+        console.log('Sending discovery response:', {
+          needsClarification: result.needsClarification,
+          questionCount: safeQuestions.length,
+          action: result.action,
+        });
         
-        // Ensure EVERY code path ends with reply.send()
+        // Return with action type for UI handling
         return reply.code(200).type('application/json').send({
-          needsClarification: true,
+          needsClarification: result.needsClarification !== false,
           questions: safeQuestions,
           state: serializableState,
+          action: result.action,
+          appConfig: result.appConfig,
         });
       } catch (error: any) {
         // On error, NEVER crash. Instead return 200 with error flag
@@ -356,6 +415,81 @@ export async function registerAppRoutes(
         } else {
           console.warn('Response already sent when error occurred');
         }
+      }
+    }
+  );
+
+  /**
+   * Chat-based Discovery endpoint - Friendly conversational flow
+   * POST /api/apps/discover/chat
+   */
+  server.post<{
+    Body: {
+      input: string;
+      action: 'start' | 'continue';
+      state?: {
+        step: number;
+        collectedInfo: Record<string, unknown>;
+        originalInput: string;
+      };
+      originalInput?: string;
+    };
+  }>(
+    '/api/apps/discover/chat',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          properties: {
+            input: { type: 'string' },
+            action: { type: 'string', enum: ['start', 'continue'] },
+            state: { type: 'object' },
+            originalInput: { type: 'string' },
+          },
+          required: ['input', 'action'],
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const { input, action, state, originalInput } = request.body;
+
+        console.log('Chat discovery:', action, input?.substring(0, 50));
+
+        // Import the conversational handler dynamically
+        const { ConversationalDiscoveryHandler } = await import('@neo/discovery');
+        const chatHandler = new ConversationalDiscoveryHandler();
+
+        if (action === 'start') {
+          const result = await chatHandler.startConversation(input);
+          return reply.code(200).type('application/json').send(result);
+        }
+
+        if (action === 'continue' && state) {
+          const conversationState = {
+            step: state.step || 1,
+            collectedInfo: state.collectedInfo || {},
+            originalInput: originalInput || state.originalInput || '',
+            questionsAsked: (state as any).questionsAsked || [],
+            confidence: (state as any).confidence || 0.3,
+          };
+
+          const result = await chatHandler.continueConversation(input, conversationState);
+          return reply.code(200).type('application/json').send(result);
+        }
+
+        return reply.code(400).type('application/json').send({
+          error: 'Invalid action or missing state',
+        });
+      } catch (error: any) {
+        console.error('Chat discovery error:', error);
+        return reply.code(200).type('application/json').send({
+          message: "Oops! I had a hiccup. Let me try again... What kind of app are you building?",
+          quickReplies: ['Restaurant', 'Salon', 'Fitness', 'Real Estate', 'Other'],
+          complete: false,
+          step: 1,
+          collectedInfo: {},
+        });
       }
     }
   );
@@ -432,9 +566,18 @@ export async function registerAppRoutes(
         }
         
         // Generate app using neoEngine
+        // Map appConfig from discovery to discoveredInfo for the AI pipeline
         const processedIntent: ProcessedIntent = {
           rawInput: input,
           type: 'create_app',
+          discoveredInfo: appConfig ? {
+            industry: appConfig.industryText,
+            primaryIntent: appConfig.primaryIntent,
+            context: appConfig.context,
+            teamSize: appConfig.teamSize,
+            offerType: appConfig.offerType,
+            onlineAcceptance: appConfig.onlineAcceptance,
+          } : undefined,
           extractedDetails: category ? { category: String(category) } : undefined,
         };
         const generated = await neoEngine.generateApp(processedIntent);
@@ -485,8 +628,30 @@ export async function registerAppRoutes(
           });
         }
 
-        // Store app
+        // Store app in memory (for immediate access)
         appStore.set(app.id, app);
+        
+        // Persist to storage (database or file-based)
+        try {
+          await appRepository.save({
+            id: app.id,
+            name: app.name,
+            description: app.description,
+            category: app.category,
+            schema: app.schema as Record<string, unknown>,
+            theme: app.theme as Record<string, unknown>,
+            data: app.data as Record<string, unknown>,
+            settings: app.settings as Record<string, unknown>,
+          }, preferences?.userId);
+          logger.info('App persisted to storage', { appId: app.id, useDatabase: isDatabaseEnabled() });
+        } catch (persistError: any) {
+          // Log but don't fail - app is still in memory
+          logger.warn('Failed to persist app to storage (will be in memory only)', {
+            appId: app.id,
+            error: persistError?.message,
+          });
+        }
+        
         logger.info('App created and stored', {
           appId: app.id,
           appName: app.name,
@@ -600,10 +765,45 @@ export async function registerAppRoutes(
         console.log('Stored app IDs:', storedIds);
         logger.debug('Available app IDs in store', { storedIds, count: storedIds.length });
         
-        const app = appStore.get(appId);
+        // First check memory store
+        let app = appStore.get(appId);
+        
+        // If not in memory, check persistent storage (database or file)
+        if (!app) {
+          console.log('App not in memory, checking persistent storage...');
+          logger.debug('Checking persistent storage for app', { appId });
+          
+          try {
+            const storedApp = await appRepository.findById(appId);
+            if (storedApp) {
+              console.log('App found in persistent storage, caching in memory');
+              // Convert to App type and cache in memory for future requests
+              app = {
+                id: storedApp.id,
+                name: storedApp.name,
+                description: storedApp.description,
+                category: (storedApp.category as any) || 'personal',
+                privacyLevel: 'private' as any,
+                version: 1,
+                createdAt: storedApp.createdAt ? new Date(storedApp.createdAt) : new Date(),
+                updatedAt: storedApp.updatedAt ? new Date(storedApp.updatedAt) : new Date(),
+                createdBy: storedApp.userId || randomUUID(),
+                schema: storedApp.schema as any,
+                theme: storedApp.theme as any,
+                data: storedApp.data as any,
+                settings: storedApp.settings as any,
+              };
+              // Cache in memory store for faster subsequent access
+              appStore.set(appId, app);
+              logger.info('App loaded from persistent storage and cached', { appId });
+            }
+          } catch (storageError: any) {
+            logger.warn('Persistent storage lookup failed', { appId, error: storageError?.message });
+          }
+        }
         
         if (!app) {
-          console.log('App not found in store. Requested ID:', appId, 'Available IDs:', storedIds);
+          console.log('App not found in store or persistent storage. Requested ID:', appId, 'Available IDs:', storedIds);
           logger.warn('App not found', { appId, availableIds: storedIds });
           return reply.code(404).type('application/json').send({
             success: false,

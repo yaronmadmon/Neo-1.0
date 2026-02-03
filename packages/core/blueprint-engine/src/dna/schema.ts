@@ -324,6 +324,9 @@ export const UnifiedPageSchema = z.object({
       defaultDirection: z.enum(['asc', 'desc']).optional(),
     }).optional(),
     
+    // Card type for list rendering (PersonCard, ItemCard, etc.)
+    cardType: z.enum(['personCard', 'itemCard', 'card', 'default']).optional(),
+    
     // Calendar config
     calendar: z.object({
       dateField: z.string(),

@@ -16,7 +16,7 @@ interface WorkflowInspectorProps {
 const triggerConfig: Record<string, { icon: string; label: string; color: string }> = {
   button_click: { icon: '🔘', label: 'Button Click', color: 'bg-blue-100 text-blue-700' },
   form_submit: { icon: '📋', label: 'Form Submit', color: 'bg-green-100 text-green-700' },
-  data_create: { icon: '➕', label: 'Data Create', color: 'bg-purple-100 text-purple-700' },
+  data_create: { icon: '➕', label: 'Data Create', color: 'bg-primary/10 text-primary' },
   data_update: { icon: '✏️', label: 'Data Update', color: 'bg-amber-100 text-amber-700' },
   data_delete: { icon: '🗑️', label: 'Data Delete', color: 'bg-red-100 text-red-700' },
 };
@@ -26,7 +26,7 @@ const actionConfig: Record<string, { icon: string; label: string; color: string 
   create_record: { icon: '➕', label: 'Create Record', color: 'bg-green-100 text-green-700' },
   update_record: { icon: '✏️', label: 'Update Record', color: 'bg-blue-100 text-blue-700' },
   delete_record: { icon: '🗑️', label: 'Delete Record', color: 'bg-red-100 text-red-700' },
-  navigate: { icon: '🧭', label: 'Navigate', color: 'bg-purple-100 text-purple-700' },
+  navigate: { icon: '🧭', label: 'Navigate', color: 'bg-primary/10 text-primary' },
   show_notification: { icon: '🔔', label: 'Show Notification', color: 'bg-amber-100 text-amber-700' },
   refresh_data: { icon: '🔄', label: 'Refresh Data', color: 'bg-cyan-100 text-cyan-700' },
 };
@@ -102,8 +102,8 @@ const FlowCard: React.FC<{
     className={`
       p-4 rounded-lg border-2 cursor-pointer transition-all
       ${isSelected
-        ? 'border-purple-500 bg-purple-50 shadow-md'
-        : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow'
+        ? 'border-primary bg-accent shadow-sm'
+        : 'border-border bg-card hover:border-border hover:bg-accent/50'
       }
       ${!flow.enabled ? 'opacity-60' : ''}
     `}
@@ -188,7 +188,7 @@ export const WorkflowInspector: React.FC<WorkflowInspectorProps> = ({
             {/* Back button */}
             <button
               onClick={() => onSelect({ type: 'flow', id: '' })}
-              className="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-700 mb-4"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />

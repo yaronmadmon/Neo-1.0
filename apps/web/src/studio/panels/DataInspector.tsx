@@ -17,7 +17,7 @@ interface DataInspectorProps {
 const fieldTypeConfig: Record<string, { icon: string; color: string; bg: string }> = {
   string: { icon: 'Aa', color: 'text-blue-600', bg: 'bg-blue-100' },
   number: { icon: '#', color: 'text-green-600', bg: 'bg-green-100' },
-  boolean: { icon: '✓', color: 'text-purple-600', bg: 'bg-purple-100' },
+  boolean: { icon: '✓', color: 'text-primary', bg: 'bg-primary/10' },
   date: { icon: '📅', color: 'text-amber-600', bg: 'bg-amber-100' },
   email: { icon: '@', color: 'text-cyan-600', bg: 'bg-cyan-100' },
   url: { icon: '🔗', color: 'text-indigo-600', bg: 'bg-indigo-100' },
@@ -57,8 +57,8 @@ const ModelCard: React.FC<{
     className={`
       p-4 rounded-lg border-2 cursor-pointer transition-all
       ${isSelected
-        ? 'border-purple-500 bg-purple-50 shadow-md'
-        : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow'
+        ? 'border-primary bg-accent shadow-sm'
+        : 'border-border bg-card hover:border-border hover:bg-accent/50'
       }
     `}
   >
@@ -108,7 +108,7 @@ const FieldDetail: React.FC<{ field: FieldData }> = ({ field }) => (
           <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600">Required</span>
         )}
         {field.unique && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-600">Unique</span>
+          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">Unique</span>
         )}
       </div>
       <FieldTypeBadge type={field.type} />
@@ -248,7 +248,7 @@ export const DataInspector: React.FC<DataInspectorProps> = ({
             {/* Back button */}
             <button
               onClick={() => onSelect({ type: 'dataModel', id: '' })}
-              className="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-700 mb-4"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -275,8 +275,8 @@ export const DataInspector: React.FC<DataInspectorProps> = ({
                 onClick={() => setViewMode('models')}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors
                   ${viewMode === 'models'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-accent text-accent-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
                   }`}
               >
                 📋 Schema
@@ -285,8 +285,8 @@ export const DataInspector: React.FC<DataInspectorProps> = ({
                 onClick={() => setViewMode('detail')}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors
                   ${viewMode === 'detail'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-accent text-accent-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
                   }`}
               >
                 💾 Data

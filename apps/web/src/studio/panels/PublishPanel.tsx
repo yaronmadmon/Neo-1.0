@@ -164,8 +164,8 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
                 <div className="text-sm text-gray-500 mt-1">Not published</div>
               )}
             </div>
-            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-              <div className="text-xs text-purple-600 font-medium uppercase">Staging</div>
+            <div className="p-3 bg-muted border rounded-lg">
+              <div className="text-xs text-muted-foreground font-medium uppercase">Staging</div>
               {currentStaging ? (
                 <>
                   <div className="text-lg font-bold text-gray-900 mt-1">v{currentStaging.version}</div>
@@ -192,7 +192,7 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
               <select
                 value={publishEnvironment}
                 onChange={(e) => setPublishEnvironment(e.target.value as 'staging' | 'production')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="staging">Staging</option>
                 <option value="production">Production</option>
@@ -200,7 +200,7 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
             </div>
             
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
                 Description (optional)
               </label>
               <input
@@ -208,14 +208,14 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
                 value={publishDescription}
                 onChange={(e) => setPublishDescription(e.target.value)}
                 placeholder="What's new in this version?"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
             
             <button
               onClick={handlePublish}
               disabled={loading}
-              className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
             >
               {loading ? 'Publishing...' : `Publish to ${publishEnvironment}`}
             </button>
@@ -246,7 +246,7 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
             <button
               onClick={fetchVersions}
               disabled={loading}
-              className="text-xs text-purple-600 hover:text-purple-700 disabled:opacity-50"
+              className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               Refresh
             </button>
@@ -263,8 +263,8 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
                   key={version.id}
                   className={`p-3 rounded-lg border ${
                     version.isCurrent
-                      ? 'bg-purple-50 border-purple-200'
-                      : 'bg-white border-gray-200'
+                      ? 'bg-accent border-accent'
+                      : 'bg-card border-border'
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -281,7 +281,7 @@ export const PublishPanel: React.FC<PublishPanelProps> = ({ appId }) => {
                           {version.environment}
                         </span>
                         {version.isCurrent && (
-                          <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
+                          <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded">
                             Current
                           </span>
                         )}

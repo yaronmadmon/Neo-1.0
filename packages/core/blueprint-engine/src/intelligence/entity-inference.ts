@@ -42,12 +42,158 @@ interface EntityTemplate {
 }
 
 const ENTITY_TEMPLATES: EntityTemplate[] = [
-  // PEOPLE
+  // ============================================================
+  // DOMAIN-SPECIFIC PEOPLE ENTITIES (Higher priority)
+  // ============================================================
+  
+  {
+    id: 'tenant',
+    name: 'Tenant',
+    pluralName: 'Tenants',
+    triggers: ['tenant', 'renter', 'lessee', 'occupant'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: true },
+      { id: 'moveInDate', name: 'Move-in Date', type: 'date', required: false },
+      { id: 'leaseEndDate', name: 'Lease End Date', type: 'date', required: false },
+      { id: 'monthlyRent', name: 'Monthly Rent', type: 'currency', required: false },
+      { id: 'emergencyContact', name: 'Emergency Contact', type: 'string', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    relationships: [
+      { type: 'one_to_many', target: 'unit', fieldName: 'unitId' },
+    ],
+    icon: '🏠',
+  },
+  {
+    id: 'member',
+    name: 'Member',
+    pluralName: 'Members',
+    triggers: ['member', 'gym member', 'subscriber', 'membership holder'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: true },
+      { id: 'phone', name: 'Phone', type: 'phone', required: false },
+      { id: 'joinDate', name: 'Join Date', type: 'date', required: false },
+      { id: 'membershipType', name: 'Membership Type', type: 'enum', required: false },
+      { id: 'emergencyContact', name: 'Emergency Contact', type: 'string', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '💪',
+  },
+  {
+    id: 'student',
+    name: 'Student',
+    pluralName: 'Students',
+    triggers: ['student', 'learner', 'pupil', 'tutee'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: false },
+      { id: 'parentName', name: 'Parent/Guardian', type: 'string', required: false },
+      { id: 'parentPhone', name: 'Parent Phone', type: 'phone', required: false },
+      { id: 'gradeLevel', name: 'Grade Level', type: 'string', required: false },
+      { id: 'subjects', name: 'Subjects', type: 'string', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '📚',
+  },
+  {
+    id: 'homeowner',
+    name: 'Homeowner',
+    pluralName: 'Homeowners',
+    triggers: ['homeowner', 'home owner', 'property owner', 'house owner'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: true },
+      { id: 'address', name: 'Address', type: 'address', required: true },
+      { id: 'propertyType', name: 'Property Type', type: 'string', required: false },
+      { id: 'notes', name: 'Notes', type: 'text', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '🏡',
+  },
+  {
+    id: 'careRecipient',
+    name: 'Care Recipient',
+    pluralName: 'Care Recipients',
+    triggers: ['care recipient', 'patient', 'senior', 'elderly'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'dateOfBirth', name: 'Date of Birth', type: 'date', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: false },
+      { id: 'address', name: 'Address', type: 'address', required: false },
+      { id: 'primaryContact', name: 'Primary Contact', type: 'string', required: true },
+      { id: 'primaryContactPhone', name: 'Primary Contact Phone', type: 'phone', required: true },
+      { id: 'careNeeds', name: 'Care Needs', type: 'text', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '❤️',
+  },
+  {
+    id: 'vehicleOwner',
+    name: 'Vehicle Owner',
+    pluralName: 'Vehicle Owners',
+    triggers: ['vehicle owner', 'car owner', 'auto customer'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: true },
+      { id: 'address', name: 'Address', type: 'address', required: false },
+      { id: 'notes', name: 'Notes', type: 'text', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '🚗',
+  },
+  {
+    id: 'customer',
+    name: 'Customer',
+    pluralName: 'Customers',
+    triggers: ['customer', 'buyer', 'shopper'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: false },
+      { id: 'address', name: 'Address', type: 'address', required: false },
+      { id: 'notes', name: 'Notes', type: 'text', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable', 'attachable'],
+    icon: '🛒',
+  },
+  {
+    id: 'guest',
+    name: 'Guest',
+    pluralName: 'Guests',
+    triggers: ['guest', 'diner', 'visitor'],
+    fields: [
+      { id: 'name', name: 'Name', type: 'string', required: true },
+      { id: 'email', name: 'Email', type: 'email', required: false },
+      { id: 'phone', name: 'Phone', type: 'phone', required: false },
+      { id: 'preferences', name: 'Preferences', type: 'text', required: false },
+      { id: 'status', name: 'Status', type: 'enum', required: true },
+    ],
+    behaviors: ['commentable'],
+    icon: '🍽️',
+  },
+
+  // ============================================================
+  // GENERIC PEOPLE ENTITIES (Lower priority fallbacks)
+  // ============================================================
+  
   {
     id: 'client',
     name: 'Client',
     pluralName: 'Clients',
-    triggers: ['client', 'customer', 'account', 'lead', 'prospect', 'contact'],
+    triggers: ['client', 'account', 'lead', 'prospect', 'contact'],
     fields: [
       { id: 'name', name: 'Name', type: 'string', required: true },
       { id: 'email', name: 'Email', type: 'email', required: false },
@@ -79,7 +225,7 @@ const ENTITY_TEMPLATES: EntityTemplate[] = [
     id: 'patient',
     name: 'Patient',
     pluralName: 'Patients',
-    triggers: ['patient', 'member', 'participant'],
+    triggers: ['patient', 'participant'],
     fields: [
       { id: 'name', name: 'Name', type: 'string', required: true },
       { id: 'email', name: 'Email', type: 'email', required: false },
@@ -616,17 +762,65 @@ export class EntityInferenceEngine {
   ): InferredEntity[] {
     const entities: InferredEntity[] = [];
     
-    // Map industry to standard entities
+    // Map industry to standard entities with domain-specific terminology
     const industryEntityMap: Record<string, string[]> = {
-      'trades': ['client', 'job', 'quote', 'invoice', 'material'],
+      // Home service trades - use homeowner instead of client
+      'trades': ['homeowner', 'job', 'quote', 'invoice', 'material'],
+      'plumber': ['homeowner', 'job', 'quote', 'invoice', 'material'],
+      'electrician': ['homeowner', 'job', 'quote', 'invoice', 'material'],
+      'hvac': ['homeowner', 'job', 'quote', 'invoice', 'material'],
+      'roofing': ['homeowner', 'job', 'quote', 'invoice'],
+      'handyman': ['homeowner', 'job', 'invoice'],
+      'contractor': ['homeowner', 'project', 'quote', 'invoice'],
+      
+      // Property management - use tenant
+      'property_management': ['tenant', 'property', 'lease', 'maintenance_request'],
+      'property-management': ['tenant', 'property', 'lease', 'maintenance_request'],
+      
+      // Fitness - distinguish between personal training and gym
+      'fitness': ['client', 'appointment', 'payment'],
+      'fitness-coach': ['client', 'appointment', 'payment'],
+      'gym': ['member', 'membership_plan', 'fitnessClass', 'attendance'],
+      
+      // Cleaning - distinguish residential vs commercial
+      'cleaning': ['propertyOwner', 'job', 'invoice'],
+      'commercial-cleaning': ['businessClient', 'location', 'serviceContract'],
+      
+      // Education - use student
+      'education': ['student', 'lesson', 'invoice'],
+      'tutor': ['student', 'lesson', 'invoice'],
+      
+      // Auto - use vehicleOwner
+      'mechanic': ['vehicleOwner', 'vehicle', 'repairOrder', 'invoice'],
+      
+      // Healthcare
       'healthcare': ['patient', 'appointment', 'invoice'],
-      'hospitality': ['client', 'appointment', 'event'],
+      'medical': ['patient', 'appointment', 'invoice'],
+      'home-health': ['careRecipient', 'visit', 'carePlan'],
+      
+      // Hospitality - use guest
+      'hospitality': ['guest', 'reservation', 'event'],
+      'restaurant': ['guest', 'reservation', 'order'],
+      
+      // Retail - use customer
+      'retail': ['customer', 'product', 'order', 'invoice'],
+      'ecommerce': ['customer', 'product', 'order'],
+      'bakery': ['customer', 'product', 'order'],
+      
+      // Real estate (buying/selling)
+      'real_estate': ['client', 'property', 'appointment', 'document'],
+      'real-estate': ['client', 'property', 'appointment', 'document'],
+      
+      // Landscaping
+      'landscaping': ['propertyOwner', 'project', 'invoice'],
+      
+      // Professional services
       'professional': ['client', 'project', 'invoice', 'document'],
       'creative': ['client', 'project', 'invoice'],
-      'fitness': ['client', 'appointment', 'payment'],
-      'retail': ['client', 'product', 'invoice'],
-      'real_estate': ['client', 'property', 'appointment', 'document'],
-      'education': ['client', 'appointment', 'event'],
+      'photographer': ['client', 'shoot', 'invoice'],
+      'salon': ['client', 'appointment', 'invoice'],
+      
+      // Generic fallbacks
       'personal': ['task', 'note', 'event'],
       'home': ['task', 'event', 'note'],
       'services': ['client', 'appointment', 'invoice'],

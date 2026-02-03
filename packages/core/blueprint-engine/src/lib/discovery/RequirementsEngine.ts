@@ -94,12 +94,13 @@ export class RequirementsEngine {
       if (answers.industry && String(answers.industry).toLowerCase() === kit.id) {
         score += 4;
       }
-      if (!best || score > best.score) {
+      // Only consider kits with positive score to avoid defaulting to first kit in array
+      if (score > 0 && (!best || score > best.score)) {
         best = { kit, score };
       }
     }
 
-    return best?.kit || getIndustryKit('services');
+    return best?.kit || getIndustryKit('general_business');
   }
 
   private resolveProfession(text: string, kit: IndustryKit): string | undefined {

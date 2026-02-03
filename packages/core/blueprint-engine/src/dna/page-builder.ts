@@ -202,6 +202,9 @@ export class PageBuilder {
     const listFields = entity.display.listFields || [];
     const searchFields = entity.display.searchFields || [];
     
+    // Determine the card type for this entity
+    const cardType = this.getCardTypeForEntity(entity);
+    
     const components: UnifiedComponent[] = [
       // Header with title and add button
       {
@@ -247,6 +250,7 @@ export class PageBuilder {
           columns: this.mapFieldsToColumns(entity, listFields),
           showActions: true,
           selectable: true,
+          cardType, // Pass the card type for rendering
         },
         events: {
           onRowClick: `navigate-${entity.id}-detail`,
@@ -304,6 +308,7 @@ export class PageBuilder {
           type: 'select' as const,
           label: entity.fields.find(field => field.id === f)?.name,
         })),
+        cardType, // Store the card type in config for materialization
       },
       navigation: { showInSidebar: true, order: isDefault ? 0 : (ctx.pageIndex ?? 10) },
     };
@@ -820,6 +825,34 @@ export class PageBuilder {
   private shouldGenerateGallery(entity: UnifiedEntity, features: DetectedFeature[]): boolean {
     const hasImageField = entity.fields.some(f => f.type === 'image');
     return hasImageField && entity.fields.filter(f => f.type === 'image').length >= 1;
+  }
+
+  /**
+   * Determine the appropriate card type for an entity
+   * Used for selecting PersonCard, ItemCard, or generic Card in list views
+   */
+  getCardTypeForEntity(entity: UnifiedEntity): 'personCard' | 'itemCard' | 'card' {
+    const personKeywords = [
+      'customer', 'client', 'member', 'patient', 'contact', 
+      'user', 'employee', 'staff', 'student', 'tenant',
+      'guest', 'visitor', 'lead', 'prospect'
+    ];
+    const itemKeywords = [
+      'product', 'item', 'order', 'service', 'appointment',
+      'booking', 'invoice', 'payment', 'class', 'equipment',
+      'property', 'listing', 'task', 'project'
+    ];
+    
+    const nameLower = entity.name.toLowerCase();
+    
+    if (personKeywords.some(k => nameLower.includes(k))) {
+      return 'personCard';
+    }
+    if (itemKeywords.some(k => nameLower.includes(k))) {
+      return 'itemCard';
+    }
+    
+    return 'card';
   }
 
   private getInputTypeForField(field: UnifiedEntity['fields'][0]): string {

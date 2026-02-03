@@ -96,7 +96,7 @@ const PropertyValue: React.FC<{ value: unknown; depth?: number }> = ({ value, de
       <div className="pl-4 border-l-2 border-gray-200 ml-1 space-y-1">
         {entries.slice(0, 8).map(([key, val]) => (
           <div key={key} className="flex items-start gap-2">
-            <span className="text-purple-600 text-xs font-medium">{key}:</span>
+            <span className="text-primary text-xs font-medium">{key}:</span>
             <PropertyValue value={val} depth={depth + 1} />
           </div>
         ))}
@@ -116,7 +116,7 @@ const PropertyRow: React.FC<{ label: string; value: unknown; highlight?: boolean
   value,
   highlight,
 }) => (
-  <div className={`py-2 ${highlight ? 'bg-purple-50 -mx-4 px-4' : ''}`}>
+  <div className={`py-2 ${highlight ? 'bg-accent -mx-4 px-4' : ''}`}>
     <div className="flex items-start justify-between gap-4">
       <span className="text-sm font-medium text-gray-700 shrink-0">{label}</span>
       <div className="text-sm text-right overflow-hidden">
@@ -214,7 +214,7 @@ export const ComponentInspector: React.FC<ComponentInspectorProps> = ({
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {/* Page info */}
-          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 mb-4">
+          <div className="bg-muted rounded-lg p-4 mb-4">
             <h3 className="text-xl font-bold text-gray-900">{selectedPage.name}</h3>
             <p className="text-sm text-gray-600 mt-1">Route: {selectedPage.route}</p>
           </div>
@@ -249,7 +249,7 @@ export const ComponentInspector: React.FC<ComponentInspectorProps> = ({
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {/* Component info header */}
-          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 mb-4">
+          <div className="bg-muted rounded-lg p-4 mb-4">
             <div className="flex items-start gap-3">
               <span className="text-3xl">
                 {selectedComponent.componentId === 'text' ? '📝' :

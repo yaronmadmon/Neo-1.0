@@ -17,6 +17,20 @@ export { UILayoutSelector } from './ui-layout-selector.js';
 export { BehaviorMatcher } from './behavior-matcher.js';
 export { VoiceRevisionEngine } from './voice-revision-engine.js';
 
+// Export action mapper for industry-aware card actions
+export {
+  getEntityActions,
+  getEntityActionTypes,
+  getPrimaryAction,
+  getSecondaryActions,
+  getActionDefinition,
+  createAction,
+  isPersonEntity,
+  isItemEntity,
+  getCardTypeForEntity,
+} from './action-mapper.js';
+export type { CardAction, CardActionType } from './action-mapper.js';
+
 // Export types selectively to avoid conflicts with core types
 export type {
   VoiceInput,

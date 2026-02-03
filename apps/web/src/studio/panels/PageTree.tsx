@@ -12,6 +12,8 @@ interface PageTreeProps {
   expandedNodes: Set<string>;
   onSelect: (selection: Selection) => void;
   onToggleExpand: (nodeId: string) => void;
+  onExpandAll?: (nodeIds: Set<string>) => void;
+  onCollapseAll?: () => void;
 }
 
 // Icons for different component types
@@ -105,8 +107,8 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
         className={`
           flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md transition-colors
           ${isSelected 
-            ? 'bg-purple-100 text-purple-900 border-l-2 border-purple-500' 
-            : 'hover:bg-gray-100 text-gray-700'
+            ? 'bg-accent text-accent-foreground border-l-2 border-primary' 
+            : 'hover:bg-muted text-muted-foreground'
           }
         `}
         style={{ paddingLeft }}
@@ -179,6 +181,8 @@ export const PageTree: React.FC<PageTreeProps> = ({
   expandedNodes,
   onSelect,
   onToggleExpand,
+  onExpandAll,
+  onCollapseAll,
 }) => {
   // Build tree structure
   const tree = useMemo(() => pages.map(buildPageTree), [pages]);
@@ -243,21 +247,43 @@ export const PageTree: React.FC<PageTreeProps> = ({
       <div className="p-3 border-t border-gray-200 bg-gray-50">
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={() => {
-              // Expand all
+              // Collect all node IDs to expand
+              const allIds = new Set<string>();
+              const collectIds = (components: ComponentData[] | undefined) => {
+                components?.forEach(c => {
+                  allIds.add(c.id);
+                  if (c.children) collectIds(c.children);
+                });
+              };
               pages.forEach(p => {
-                onToggleExpand(p.id);
-                p.components?.forEach(c => onToggleExpand(c.id));
+                allIds.add(p.id);
+                collectIds(p.components);
               });
+              
+              // Use onExpandAll if available, otherwise fallback to toggling
+              if (onExpandAll) {
+                onExpandAll(allIds);
+              } else {
+                allIds.forEach(id => {
+                  if (!expandedNodes.has(id)) onToggleExpand(id);
+                });
+              }
             }}
             className="flex-1 text-xs px-2 py-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
           >
             Expand All
           </button>
           <button
+            type="button"
             onClick={() => {
-              // Collapse all - just clear expanded nodes by toggling all
-              Array.from(expandedNodes).forEach(id => onToggleExpand(id));
+              // Use onCollapseAll if available, otherwise fallback to toggling
+              if (onCollapseAll) {
+                onCollapseAll();
+              } else {
+                Array.from(expandedNodes).forEach(id => onToggleExpand(id));
+              }
             }}
             className="flex-1 text-xs px-2 py-1.5 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
           >
