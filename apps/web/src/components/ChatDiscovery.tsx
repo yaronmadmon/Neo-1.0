@@ -64,7 +64,21 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
     originalInput: string;
     questionsAsked: string[];
     confidence: number;
-  }>({ step: 0, collectedInfo: {}, originalInput: '', questionsAsked: [], confidence: 0.3 });
+    pendingConfirmation: boolean;
+    questionCount: number;
+    enabledFeatures: string[];
+    answers: Record<string, string>;
+  }>({ 
+    step: 0, 
+    collectedInfo: {}, 
+    originalInput: '', 
+    questionsAsked: [], 
+    confidence: 0.3, 
+    pendingConfirmation: false,
+    questionCount: 0,
+    enabledFeatures: [],
+    answers: {},
+  });
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +99,17 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setMessages([]);
-      setConversationState({ step: 0, collectedInfo: {}, originalInput: '', questionsAsked: [], confidence: 0.3 });
+      setConversationState({ 
+        step: 0, 
+        collectedInfo: {}, 
+        originalInput: '', 
+        questionsAsked: [], 
+        confidence: 0.3, 
+        pendingConfirmation: false,
+        questionCount: 0,
+        enabledFeatures: [],
+        answers: {},
+      });
     }
   }, [isOpen]);
 
@@ -164,6 +188,11 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
         collectedInfo: data.collectedInfo || {},
         questionsAsked: data.questionsAsked || prev.questionsAsked || [],
         confidence: data.confidence || prev.confidence || 0.3,
+        pendingConfirmation: data.pendingConfirmation || false,
+        questionCount: data.questionCount || prev.questionCount || 0,
+        enabledFeatures: data.enabledFeatures || prev.enabledFeatures || [],
+        // IMPORTANT: Preserve answers for vibe/businessName to work
+        answers: data.answers || prev.answers || {},
       }));
 
       // If discovery is complete
@@ -177,7 +206,6 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
       addMessage({
         type: 'ai',
         content: "Oops! I had a little hiccup there. Let me try again... What type of business or project is this for?",
-        quickReplies: ['Restaurant', 'Salon', 'Fitness', 'Real Estate', 'Other'],
       });
       // Reset state on error to prevent stale state issues
       setConversationState(prev => ({
@@ -185,6 +213,10 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
         step: 1,
         questionsAsked: [],
         confidence: 0.3,
+        pendingConfirmation: false,
+        questionCount: 0,
+        enabledFeatures: [],
+        answers: {},
       }));
     }
   };
@@ -239,6 +271,11 @@ export const ChatDiscovery: React.FC<ChatDiscoveryProps> = ({
         collectedInfo: { ...prev.collectedInfo, ...data.collectedInfo },
         questionsAsked: data.questionsAsked || prev.questionsAsked || [],
         confidence: data.confidence || prev.confidence || 0.3,
+        pendingConfirmation: data.pendingConfirmation || false,
+        questionCount: data.questionCount || prev.questionCount || 0,
+        enabledFeatures: data.enabledFeatures || prev.enabledFeatures || [],
+        // IMPORTANT: Preserve answers for vibe/businessName to work
+        answers: data.answers || prev.answers || {},
       }));
 
       // If discovery is complete

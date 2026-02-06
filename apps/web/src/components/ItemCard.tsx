@@ -64,6 +64,10 @@ export interface ItemCardProps {
   style?: React.CSSProperties;
   /** Click handler for the card itself */
   onClick?: () => void;
+  /** Compact mode - hides placeholder image and reduces spacing */
+  compact?: boolean;
+  /** Hide image placeholder when no image URL is provided */
+  hideImagePlaceholder?: boolean;
 }
 
 // ============================================================
@@ -71,16 +75,19 @@ export interface ItemCardProps {
 // ============================================================
 
 /**
- * Get status color classes
+ * Get status color classes - Theme-aware using CSS variables with fallbacks
+ * Uses semantic color tokens: --success, --warning, --error, --info, --muted
  */
 function getStatusColorClasses(color: ItemCardStatusColor): string {
+  // Theme-aware color classes using CSS variables
+  // Each uses the semantic token if defined, with sensible fallbacks
   const colorMap: Record<ItemCardStatusColor, string> = {
-    green: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    yellow: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-    red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-    blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-    gray: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
-    purple: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+    green: 'bg-[hsl(var(--success-bg,142_76%_95%))] text-[hsl(var(--success,142_71%_45%))] dark:bg-[hsl(var(--success,142_71%_45%)/0.2)] dark:text-[hsl(var(--success,142_71%_45%))]',
+    yellow: 'bg-[hsl(var(--warning-bg,45_93%_95%))] text-[hsl(var(--warning,45_93%_47%))] dark:bg-[hsl(var(--warning,45_93%_47%)/0.2)] dark:text-[hsl(var(--warning,45_93%_47%))]',
+    red: 'bg-[hsl(var(--error-bg,0_84%_95%))] text-[hsl(var(--error,0_84%_60%))] dark:bg-[hsl(var(--error,0_84%_60%)/0.2)] dark:text-[hsl(var(--error,0_84%_60%))]',
+    blue: 'bg-[hsl(var(--info-bg,201_96%_95%))] text-[hsl(var(--info,201_96%_32%))] dark:bg-[hsl(var(--info,201_96%_32%)/0.2)] dark:text-[hsl(var(--info,201_96%_32%))]',
+    gray: 'bg-muted text-muted-foreground',
+    purple: 'bg-[hsl(var(--accent-bg,270_70%_95%))] text-[hsl(var(--accent,270_70%_50%))] dark:bg-[hsl(var(--accent,270_70%_50%)/0.2)] dark:text-[hsl(var(--accent,270_70%_50%))]',
   };
   return colorMap[color] || colorMap.gray;
 }
@@ -164,6 +171,8 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   className = '',
   style,
   onClick,
+  compact = false,
+  hideImagePlaceholder = false,
 }) => {
   const handleCardClick = (e: React.MouseEvent) => {
     // Don't trigger card click if clicking on a button
@@ -179,18 +188,18 @@ export const ItemCard: React.FC<ItemCardProps> = ({
       style={style}
       onClick={onClick ? handleCardClick : undefined}
     >
-      {/* Image */}
+      {/* Image - only show if we have an image or if not in compact mode and placeholders aren't hidden */}
       {image ? (
-        <div className="w-full h-32 overflow-hidden">
+        <div className={`w-full ${compact ? 'h-20' : 'h-32'} overflow-hidden`}>
           <img 
             src={image} 
             alt={title}
             className="w-full h-full object-cover"
           />
         </div>
-      ) : (
+      ) : !compact && !hideImagePlaceholder ? (
         getPlaceholderImage(title)
-      )}
+      ) : null}
 
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">

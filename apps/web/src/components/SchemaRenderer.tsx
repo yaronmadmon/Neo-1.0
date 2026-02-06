@@ -19,13 +19,59 @@ import {
 } from './layouts';
 import { DynamicAppSidebar, type NavItem } from './DynamicAppSidebar';
 
+/** Section role for dashboard narrative (from Dashboard Intent System) */
+export type SectionRole = 'today' | 'in-progress' | 'upcoming' | 'summary' | 'history';
+
+/** Section priority for visual weight */
+export type SectionPriority = 'primary' | 'secondary' | 'tertiary';
+
+/** Time scope for metrics and filtering */
+export type TimeScope = 'now' | 'today' | 'this-week' | 'this-month' | 'all-time';
+
+/** Layout hint for section presentation */
+export type LayoutHint = 'stats-row' | 'card-list' | 'data-table' | 'chart' | 'activity' | 'calendar' | 'kanban';
+
+/** Intent metadata for semantic rendering */
+export interface ComponentIntent {
+  role?: SectionRole;
+  priority?: SectionPriority;
+  timeScope?: TimeScope;
+  layoutHint?: LayoutHint;
+  emphasis?: 'normal' | 'highlighted';
+}
+
 export interface ComponentInstance {
   id: string;
   componentId: string;
   props?: Record<string, unknown>;
   children?: ComponentInstance[];
   styles?: Record<string, unknown>;
+  /** Dashboard Intent metadata for semantic rendering */
+  intent?: ComponentIntent;
 }
+
+// =============================================================================
+// INTENT ORDERING CONSTANTS
+// =============================================================================
+
+/** Canonical ordering of section roles (Now → Work → Context) */
+const ROLE_ORDER: Record<SectionRole, number> = {
+  'today': 0,
+  'in-progress': 1,
+  'upcoming': 2,
+  'summary': 3,
+  'history': 4,
+};
+
+/** Canonical ordering of priorities */
+const PRIORITY_ORDER: Record<SectionPriority, number> = {
+  'primary': 0,
+  'secondary': 1,
+  'tertiary': 2,
+};
+
+/** Roles that are allowed to have actions */
+const ACTIONABLE_ROLES: SectionRole[] = ['today', 'in-progress', 'upcoming'];
 
 /** App shell configuration for sidebar-based layouts */
 export interface AppShellConfig {
@@ -104,8 +150,43 @@ const renderComponentInstance = (
     style,
   };
   
+  // Pass intent metadata to components for semantic rendering
+  // This allows layouts to adjust spacing, density, and emphasis
+  if (instance.intent) {
+    processedProps['data-section-role'] = instance.intent.role;
+    processedProps['data-section-priority'] = instance.intent.priority;
+    processedProps['data-time-scope'] = instance.intent.timeScope;
+    processedProps['data-layout-hint'] = instance.intent.layoutHint;
+    processedProps['data-emphasis'] = instance.intent.emphasis;
+    
+    // Also pass as a structured prop for components that want to use it
+    processedProps.intent = instance.intent;
+    
+    // Check if this section can have actions (based on role)
+    const canHaveActions = instance.intent.role && ACTIONABLE_ROLES.includes(instance.intent.role);
+    processedProps['data-can-have-actions'] = canHaveActions;
+  }
+  
   // Pass data to data-driven components
-  const dataDrivenComponents = new Set(['list', 'table', 'calendar', 'kanban']);
+  // FIXED: Added all components that consume data via source prop
+  // These components extract items as data[source] in their render logic
+  const dataDrivenComponents = new Set([
+    'list',           // ListComponent - displays items in cards
+    'table',          // TableComponent - basic table
+    'dataTable',      // DataTableComponent - enhanced table with search/pagination
+    'calendar',       // CalendarComponent - date-based events
+    'kanban',         // KanbanComponent - status-based columns
+    'gallery',        // GalleryComponent - image grid
+    'chat',           // ChatComponent - message list
+    'map',            // MapComponent - location markers
+    'areaChart',      // AreaChartComponent - trend charts
+    'lineChart',      // Alias for areaChart
+    'statsCard',      // StatsCardComponent - KPI with aggregation
+    'kpiCard',        // Alias for statsCard
+    'activityFeed',   // ActivityFeedComponent - recent changes across entities
+    'recentActivity', // Alias for activityFeed
+  ]);
+  
   if (dataDrivenComponents.has(instance.componentId)) {
     const source = instance.props?.source;
     console.log('SchemaRenderer processing data component:', {
@@ -119,6 +200,13 @@ const renderComponentInstance = (
     processedProps.data = safeData;
     if (source) {
       processedProps.source = source;
+    }
+    
+    // Debug safeguard: warn if data resolution will likely fail
+    if (source && (!safeData || Object.keys(safeData).length === 0)) {
+      console.warn(`⚠️ Data resolution warning: Component "${instance.id}" (${instance.componentId}) expects data from source "${source}" but no data was provided`);
+    } else if (source && safeData && !safeData[String(source)]) {
+      console.warn(`⚠️ Data resolution warning: Component "${instance.id}" (${instance.componentId}) expects source "${source}" but available keys are: [${Object.keys(safeData).join(', ')}]`);
     }
   }
 
@@ -303,24 +391,54 @@ export const SchemaRenderer: React.FC<SchemaRendererProps> = ({
     }
   }, [theme]);
   
-  // Memoize rendered components to avoid unnecessary re-renders
-  const renderedComponents = useMemo(() => {
+  // Sort components by intent (role then priority) when intent metadata is present
+  // This enforces the "Now → Work → Context" narrative order
+  const sortedComponents = useMemo(() => {
     if (!components || components.length === 0) {
       return [];
     }
     
-    return components.map((component) => 
+    // Check if any components have intent metadata
+    const hasIntentMetadata = components.some(c => c.intent?.role);
+    
+    if (!hasIntentMetadata) {
+      // No intent metadata - return in original order (graceful fallback)
+      return components;
+    }
+    
+    // Sort by role first, then by priority within the same role
+    return [...components].sort((a, b) => {
+      const roleA = ROLE_ORDER[a.intent?.role ?? 'summary'] ?? 99;
+      const roleB = ROLE_ORDER[b.intent?.role ?? 'summary'] ?? 99;
+      if (roleA !== roleB) return roleA - roleB;
+      
+      const prioA = PRIORITY_ORDER[a.intent?.priority ?? 'tertiary'] ?? 99;
+      const prioB = PRIORITY_ORDER[b.intent?.priority ?? 'tertiary'] ?? 99;
+      return prioA - prioB;
+    });
+  }, [components]);
+  
+  // Memoize rendered components to avoid unnecessary re-renders
+  const renderedComponents = useMemo(() => {
+    if (sortedComponents.length === 0) {
+      return [];
+    }
+    
+    return sortedComponents.map((component) => 
       renderComponentInstance(component, safeData, theme, onAction)
     );
-  }, [components, safeData, theme, onAction]);
+  }, [sortedComponents, safeData, theme, onAction]);
+  
+  // Check if components use intent system
+  const hasIntentMetadata = components?.some(c => c.intent?.role);
   
   // Debug logging
   console.log('🎨 SchemaRenderer called with:', { 
     componentCount: components?.length, 
-    components,
+    hasIntentMetadata,
+    sortedByIntent: hasIntentMetadata ? 'yes' : 'no (fallback order)',
     hasData: !!safeData,
     dataKeys: Object.keys(safeData),
-    dataContent: safeData,
     hasTheme: !!theme,
     layout: layout?.type || 'default',
     hasAppShell: !!appShell?.enabled
@@ -350,17 +468,18 @@ export const SchemaRenderer: React.FC<SchemaRendererProps> = ({
         user={appShell.user}
         onNavigate={appShell.onNavigate}
       >
-        <div className="min-h-full bg-background text-foreground">
+        {/* Use surface-app for the ambient page background */}
+        <div className="min-h-full bg-surface-app text-foreground">
           {contentWithLayout}
         </div>
       </DynamicAppSidebar>
     );
   }
   
-  // Use CSS variables for theming instead of inline styles
-  // The theme is applied to :root via token-runtime, so we just use bg-background and text-foreground
+  // Use surface-app for the ambient page background
+  // This creates visual depth with content sitting on a tinted surface
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-surface-app text-foreground">
       {contentWithLayout}
     </div>
   );

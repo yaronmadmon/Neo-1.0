@@ -13,6 +13,8 @@ export default {
     'mb-4', 'mb-3', 'mb-2', 'mb-1',
     'space-y-3', 'space-y-2', 'space-y-4', 'space-y-1',
     'p-4', 'p-6', 'px-4', 'py-2', 'px-6', 'py-3', 'py-4',
+    // Surface layer classes for atmosphere
+    'bg-surface-app', 'bg-surface-section', 'bg-surface-card',
     'bg-background', 'bg-card', 'bg-muted', 'bg-accent',
     'border', 'border-border', 'border-input',
     'rounded-lg', 'rounded-md', 'rounded',
@@ -46,6 +48,11 @@ export default {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
+  			// Surface layers for atmosphere/depth
+  			'surface-app': 'hsl(var(--surface-app))',
+  			'surface-section': 'hsl(var(--surface-section))',
+  			'surface-card': 'hsl(var(--surface-card))',
+  			// Standard semantic colors
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			card: {

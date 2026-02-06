@@ -10,8 +10,54 @@ import type {
   TokenChangeEvent,
   TokenChangeCallback,
   TokenRuntime,
+  SurfaceIntent,
 } from './token-types';
 import { THEME_TO_TOKEN_MAP, RADIUS_SCALE } from './token-types';
+
+// ============================================================
+// SURFACE THEME PRESETS
+// ============================================================
+
+/**
+ * Surface theme preset definitions for atmosphere control.
+ * Each preset defines the visual layers that create depth in the app.
+ */
+const SURFACE_PRESETS: Record<SurfaceIntent, {
+  appBackground: string;
+  sectionBackground: string;
+  cardBackground: string;
+  appForeground: string;
+  dividerColor: string;
+}> = {
+  'warm-artisanal': {
+    appBackground: '#f5ebe0',      // Warm beige (~91% lightness)
+    sectionBackground: '#fdf8f3',  // Soft cream (~97% lightness)
+    cardBackground: '#ffffff',     // Pure white (100% lightness)
+    appForeground: '#44403c',      // Warm dark gray
+    dividerColor: '#e7e5e4',       // Warm stone border
+  },
+  'neutral-professional': {
+    appBackground: '#f1f5f9',      // Cool slate (~96% lightness)
+    sectionBackground: '#f8fafc',  // Very light slate (~98% lightness)
+    cardBackground: '#ffffff',     // Pure white (100% lightness)
+    appForeground: '#334155',      // Cool dark slate
+    dividerColor: '#e2e8f0',       // Slate border
+  },
+  'modern-dark': {
+    appBackground: '#0f172a',      // Dark slate (~8% lightness)
+    sectionBackground: '#1e293b',  // Elevated slate (~15% lightness)
+    cardBackground: '#334155',     // Card slate (~25% lightness)
+    appForeground: '#f1f5f9',      // Light slate text
+    dividerColor: '#475569',       // Medium slate border
+  },
+  'playful-light': {
+    appBackground: '#faf5ff',      // Light purple tint (~98% lightness)
+    sectionBackground: '#f5f3ff',  // Soft violet (~96% lightness)
+    cardBackground: '#ffffff',     // Pure white (100% lightness)
+    appForeground: '#3b0764',      // Deep purple text
+    dividerColor: '#e9d5ff',       // Light purple border
+  },
+};
 
 /**
  * Store for default token values (captured on first load)
@@ -53,6 +99,8 @@ function captureDefaults(): void {
     '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
     '--border', '--input', '--ring', '--radius',
     '--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5',
+    '--surface-app', '--surface-section', '--surface-card', 
+    '--surface-app-foreground', '--surface-divider',
     '--sidebar-background', '--sidebar-foreground', '--sidebar-primary',
     '--sidebar-primary-foreground', '--sidebar-accent', '--sidebar-accent-foreground',
     '--sidebar-border', '--sidebar-ring',
@@ -238,7 +286,87 @@ export function applyTheme(theme: ThemeTokens): void {
           }
         }
       }
+      
+      // Apply semantic status colors directly as CSS variables
+      // These are used for status badges, alerts, and other semantic UI
+      const semanticColors = ['success', 'warning', 'error', 'info'];
+      if (semanticColors.includes(colorKey)) {
+        const hslValue = toHSLValue(colorValue);
+        root.style.setProperty(`--${colorKey}`, hslValue);
+        // Also create lighter variants for backgrounds
+        const parts = hslValue.split(' ');
+        if (parts.length === 3) {
+          const h = parseFloat(parts[0]);
+          const s = parseFloat(parts[1]);
+          const l = parseFloat(parts[2]);
+          // Light background variant: same hue, lower saturation, higher lightness
+          const bgValue = `${h} ${Math.min(s, 30)}% 95%`;
+          root.style.setProperty(`--${colorKey}-bg`, bgValue);
+          // Foreground variant for dark mode
+          const fgValue = l > 50 ? '240 5.9% 10%' : '0 0% 98%';
+          root.style.setProperty(`--${colorKey}-foreground`, fgValue);
+        }
+      }
     });
+  }
+  
+  // Apply typography tokens
+  if (theme.typography) {
+    if (theme.typography.fontFamily) {
+      root.style.setProperty('--font-sans', theme.typography.fontFamily);
+    }
+    if (theme.typography.headingFamily) {
+      root.style.setProperty('--font-heading', theme.typography.headingFamily);
+    }
+    if (theme.typography.monoFamily) {
+      root.style.setProperty('--font-mono', theme.typography.monoFamily);
+    }
+    // Font size scale
+    const fontSizeScale: Record<string, string> = {
+      'xs': '0.75rem',
+      'sm': '0.875rem',
+      'base': '1rem',
+      'lg': '1.125rem',
+      'xl': '1.25rem',
+    };
+    if (theme.typography.fontSize && fontSizeScale[theme.typography.fontSize]) {
+      root.style.setProperty('--font-size-base', fontSizeScale[theme.typography.fontSize]);
+    }
+    // Line height
+    const lineHeightScale: Record<string, string> = {
+      'tight': '1.25',
+      'normal': '1.5',
+      'relaxed': '1.75',
+    };
+    if (theme.typography.lineHeight && lineHeightScale[theme.typography.lineHeight]) {
+      root.style.setProperty('--line-height-base', lineHeightScale[theme.typography.lineHeight]);
+    }
+  }
+  
+  // Apply spacing/density tokens
+  if (theme.spacing) {
+    // Spacing scale affects padding and margins
+    const spacingScale: Record<string, { base: string; tight: string; loose: string }> = {
+      'compact': { base: '0.75rem', tight: '0.5rem', loose: '1rem' },
+      'normal': { base: '1rem', tight: '0.75rem', loose: '1.5rem' },
+      'relaxed': { base: '1.5rem', tight: '1rem', loose: '2rem' },
+    };
+    if (theme.spacing.scale && spacingScale[theme.spacing.scale]) {
+      const scale = spacingScale[theme.spacing.scale];
+      root.style.setProperty('--spacing-base', scale.base);
+      root.style.setProperty('--spacing-tight', scale.tight);
+      root.style.setProperty('--spacing-loose', scale.loose);
+      root.style.setProperty('--density', theme.spacing.scale);
+    }
+    // Card padding
+    const cardPaddingScale: Record<string, string> = {
+      'sm': '0.75rem',
+      'md': '1rem',
+      'lg': '1.5rem',
+    };
+    if (theme.spacing.cardPadding && cardPaddingScale[theme.spacing.cardPadding]) {
+      root.style.setProperty('--card-padding', cardPaddingScale[theme.spacing.cardPadding]);
+    }
   }
   
   // Apply spacing tokens
@@ -263,6 +391,11 @@ export function applyTheme(theme: ThemeTokens): void {
     setMode(theme.mode === 'dark' ? 'dark' : 'light');
   }
   
+  // Apply surface theme if specified
+  if (theme.surfaceIntent) {
+    applySurfaceTheme(theme.surfaceIntent);
+  }
+  
   emitChange({
     type: 'bulk',
     tokens: appliedTokens,
@@ -285,6 +418,8 @@ export function resetTokens(): void {
     '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
     '--border', '--input', '--ring', '--radius',
     '--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5',
+    '--surface-app', '--surface-section', '--surface-card',
+    '--surface-app-foreground', '--surface-divider',
     '--sidebar-background', '--sidebar-foreground', '--sidebar-primary',
     '--sidebar-primary-foreground', '--sidebar-accent', '--sidebar-accent-foreground',
     '--sidebar-border', '--sidebar-ring',
@@ -332,6 +467,81 @@ export function setMode(mode: 'light' | 'dark'): void {
   } else {
     root.classList.remove('dark');
   }
+}
+
+// ============================================================
+// SURFACE THEME APPLICATION
+// ============================================================
+
+/**
+ * Apply a surface theme preset to CSS variables.
+ * This controls the atmosphere/environment of the app.
+ * 
+ * @param intent - The surface intent preset to apply
+ */
+export function applySurfaceTheme(intent: SurfaceIntent): void {
+  const root = getRoot();
+  if (!root) return;
+  
+  const preset = SURFACE_PRESETS[intent];
+  if (!preset) {
+    console.warn(`Unknown surface intent: ${intent}, falling back to neutral-professional`);
+    return applySurfaceTheme('neutral-professional');
+  }
+  
+  // Apply surface layer CSS variables
+  root.style.setProperty('--surface-app', toHSLValue(preset.appBackground));
+  root.style.setProperty('--surface-section', toHSLValue(preset.sectionBackground));
+  root.style.setProperty('--surface-card', toHSLValue(preset.cardBackground));
+  root.style.setProperty('--surface-app-foreground', toHSLValue(preset.appForeground));
+  root.style.setProperty('--surface-divider', toHSLValue(preset.dividerColor));
+  
+  // Also update sidebar to match the surface theme for consistency
+  root.style.setProperty('--sidebar-background', toHSLValue(preset.sectionBackground));
+  root.style.setProperty('--sidebar-border', toHSLValue(preset.dividerColor));
+  
+  // Log in development for debugging
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`🎨 Applied surface theme: ${intent}`);
+  }
+  
+  emitChange({
+    type: 'bulk',
+    tokens: {
+      '--surface-app': toHSLValue(preset.appBackground),
+      '--surface-section': toHSLValue(preset.sectionBackground),
+      '--surface-card': toHSLValue(preset.cardBackground),
+    } as Partial<Record<TokenName, string>>,
+    timestamp: Date.now(),
+  });
+}
+
+/**
+ * Get the current surface intent from CSS variables (if set).
+ * Returns null if no surface theme has been explicitly applied.
+ */
+export function getCurrentSurfaceIntent(): SurfaceIntent | null {
+  const root = getRoot();
+  if (!root) return null;
+  
+  const currentAppBg = root.style.getPropertyValue('--surface-app').trim();
+  if (!currentAppBg) return null;
+  
+  // Try to match current values to a preset
+  for (const [intent, preset] of Object.entries(SURFACE_PRESETS)) {
+    if (toHSLValue(preset.appBackground) === currentAppBg) {
+      return intent as SurfaceIntent;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Reset surface theme to defaults (neutral-professional)
+ */
+export function resetSurfaceTheme(): void {
+  applySurfaceTheme('neutral-professional');
 }
 
 /**

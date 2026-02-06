@@ -4,6 +4,11 @@
  * Falls back to keyword-based analysis when AI is unavailable
  * 
  * Now integrated with Certainty Ledger for gap-driven question generation.
+ * 
+ * REFACTORED: Updated to prevent premature completion and generic app generation.
+ * - Confidence thresholds raised to 0.95 for auto-build
+ * - Explicit confirmation required before finalizing
+ * - No arbitrary question limits that force early completion
  */
 
 import type { ClarificationQuestion } from './discovery-service.js';
@@ -88,8 +93,30 @@ interface AIGeneratedQuestion {
   category: string;
 }
 
+/**
+ * Minimum confidence threshold for auto-build without confirmation
+ * This high threshold prevents premature generic app generation
+ */
+const MIN_CONFIDENCE_FOR_AUTO_BUILD = 0.95;
+
+/**
+ * Minimum confidence to offer build with explicit confirmation
+ */
+const MIN_CONFIDENCE_FOR_CONFIRM = 0.70;
+
 export class AIDiscoveryHandler {
-  private maxQuestions = 3;
+  /**
+   * @deprecated maxQuestions should not limit discovery
+   * 
+   * WHY DEPRECATED:
+   * Arbitrary question limits cause premature completion of generic apps.
+   * Discovery should continue until confidence is high OR user explicitly confirms.
+   * 
+   * This field is preserved for backward compatibility but should not be used
+   * as a hard cutoff for discovery completion.
+   */
+  private maxQuestions = 10; // Increased from 3 - but should rely on confidence, not count
+  
   private aiProvider?: AIProviderForDiscovery;
   private industryKits: IndustryKit[] = [];
   private telemetryLogger?: TelemetryLogger;
@@ -461,13 +488,36 @@ export class AIDiscoveryHandler {
       ledger,
     };
     
-    // Check if we've hit max questions
+    // REMOVED: Force-completion at maxQuestions
+    // WHY: Arbitrary limits cause premature generic app generation
+    // Instead, offer confirmation if we've asked many questions
     if (updatedState.questionsAsked >= this.maxQuestions) {
+      console.warn(
+        `Ledger discovery: ${updatedState.questionsAsked} questions asked. ` +
+        `Confidence: ${ledger.overallReadiness}. Offering confirmation.`
+      );
+      // Don't force-complete - offer confirmation instead
+      const matchedKit = getIndustryKit(ledger.industry.value, this.industryKits);
+      const enhanced: EnhancedDiscoveryResponse = {
+        acknowledgment: `I've gathered quite a bit of information. Let me make sure I understand correctly.`,
+        assumptions: formatAssumptions(ledger, matchedKit),
+        suggestions: generateSuggestions(matchedKit, ledger),
+        question: {
+          id: 'confirm_understanding',
+          question: `Here's what I understand: ${this.summarizeUnderstanding(updatedState)}. Is this accurate?`,
+          type: 'text',
+          required: true,
+          category: 'confirmation',
+        },
+        canBuild: false, // Require confirmation
+        ledger,
+      };
+      
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true,
+        questions: [enhanced.question!],
         state: updatedState,
-        appConfig: this.generateAppConfigFromState(updatedState),
+        enhanced,
       };
     }
     
@@ -578,7 +628,12 @@ export class AIDiscoveryHandler {
     // Handle confirmation response
     if (answers.confirm_build !== undefined) {
       const confirmValue = String(answers.confirm_build).toLowerCase();
-      if (answers.confirm_build === true || confirmValue === 'yes' || confirmValue === 'true') {
+      // Check for positive confirmation
+      const positiveResponses = ['yes', 'true', 'looks good', 'correct', 'right', 'proceed', 'build it'];
+      const isConfirmed = answers.confirm_build === true || 
+        positiveResponses.some(r => confirmValue.includes(r));
+      
+      if (isConfirmed) {
         const appConfig = this.generateAppConfigFromState(updatedState);
         return {
           needsClarification: false,
@@ -587,18 +642,34 @@ export class AIDiscoveryHandler {
           appConfig,
         };
       }
-      // User wants changes - ask more questions
-      updatedState.confidence = 0.60;
+      // User provided more info or wants changes - lower confidence and continue
+      updatedState.confidence = Math.min(updatedState.confidence, 0.60);
     }
 
-    // Check if we've hit max questions - force build
+    // REMOVED: Force-build at maxQuestions
+    // WHY: Arbitrary question limits cause premature completion of generic apps.
+    // Discovery should continue until confidence is high OR user explicitly confirms.
+    // The maxQuestions limit is now just a soft warning, not a hard cutoff.
     if (updatedState.questionsAsked >= this.maxQuestions) {
-      const appConfig = this.generateAppConfigFromState(updatedState);
+      console.warn(
+        `Discovery has asked ${updatedState.questionsAsked} questions. ` +
+        `Consider offering explicit confirmation to user rather than continuing indefinitely.`
+      );
+      // Instead of force-building, offer confirmation
+      const confirmQuestion: ClarificationQuestion = {
+        id: 'confirm_after_many_questions',
+        question: `I've asked several questions but want to make sure I understand correctly. ` +
+          `Here's what I know: ${this.summarizeUnderstanding(updatedState)}. ` +
+          `Is this accurate, or is there something important I'm missing?`,
+        type: 'text',
+        required: true,
+        category: 'confirmation',
+      };
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true,
+        questions: [confirmQuestion],
         state: updatedState,
-        appConfig,
+        appConfig: this.generateAppConfigFromState(updatedState),
       };
     }
 
@@ -721,17 +792,27 @@ Analyze this and respond with JSON.`;
     };
 
     // Determine action based on confidence
-    if (parsed.confidence >= 0.90) {
+    // UPDATED: Raised threshold from 0.90 to 0.95 to prevent premature completion
+    if (parsed.confidence >= MIN_CONFIDENCE_FOR_AUTO_BUILD) {
+      // Even at very high confidence, prefer confirmation over auto-build
+      // This prevents generic apps from being forced on users
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true, // Changed from false - always confirm
+        questions: [{
+          id: 'confirm_build',
+          question: `I think I understand what you need. Before I build, is there anything unique about your business I should know?`,
+          type: 'boolean' as const,
+          required: true,
+          category: 'confirmation',
+        }],
         state,
         appConfig: this.generateAppConfigFromState(state),
-        action: 'auto_build',
+        action: 'confirm', // Changed from 'auto_build' - require confirmation
       };
     }
 
-    if (parsed.confidence >= 0.75) {
+    // UPDATED: Raised threshold from 0.75 to MIN_CONFIDENCE_FOR_CONFIRM
+    if (parsed.confidence >= MIN_CONFIDENCE_FOR_CONFIRM) {
       // If AI generated good questions, use those instead of generic confirmation
       if (parsed.questions && parsed.questions.length > 0) {
         const questions = this.convertAIQuestions(parsed.questions);
@@ -984,6 +1065,10 @@ Should we proceed to build, or do you need more information?`;
 
   /**
    * Keyword-based discovery fallback
+   * 
+   * IMPORTANT: Keyword-only analysis is less reliable than AI analysis.
+   * Confidence from keyword matching is intentionally capped to prevent
+   * premature completion when AI is unavailable.
    */
   private keywordBasedDiscovery(input: string): {
     needsClarification: boolean;
@@ -994,32 +1079,32 @@ Should we proceed to build, or do you need more information?`;
   } {
     const analysis = this.analyzeInput(input);
     
+    // IMPORTANT: Cap confidence from keyword-only analysis
+    // Keyword matching alone cannot reliably understand unique business needs
+    const cappedConfidence = Math.min(analysis.confidence, 0.70);
+    
     const state: AIDiscoveryState = {
       currentStep: 0,
       context: analysis.context,
       answers: {},
-      confidence: analysis.confidence,
+      confidence: cappedConfidence, // Use capped confidence
       questionsAsked: 0,
       detectedIndustry: analysis.industry,
       detectedIntent: analysis.intent,
       originalInput: input,
     };
 
-    if (analysis.confidence >= 0.90) {
-      return {
-        needsClarification: false,
-        questions: [],
-        state,
-        appConfig: this.generateAppConfigFromState(state),
-        action: 'auto_build',
-      };
-    }
-
-    if (analysis.confidence >= 0.75) {
+    // REMOVED: Auto-build at 0.90 - keyword matching should NEVER auto-build
+    // Keyword analysis cannot capture unique business needs
+    
+    // UPDATED: Always require confirmation for keyword-based discovery
+    // This prevents generic apps from being built without proper understanding
+    if (cappedConfidence >= MIN_CONFIDENCE_FOR_CONFIRM) {
+      const industryName = this.formatIndustryName(analysis.industry);
       const confirmQuestion: ClarificationQuestion = {
         id: 'confirm_build',
-        question: `I'll create a ${this.formatIndustryName(analysis.industry)} app focused on business operations. Does this look right?`,
-        type: 'boolean',
+        question: `Based on keywords, this looks like it might be for ${industryName}. But I want to make sure I build something that fits YOUR specific needs. What makes your business unique or different from a typical ${industryName}?`,
+        type: 'text', // Changed from boolean - encourage explanation
         required: true,
         category: 'confirmation',
       };
@@ -1027,18 +1112,18 @@ Should we proceed to build, or do you need more information?`;
         needsClarification: true,
         questions: [confirmQuestion],
         state,
-        appConfig: this.generateAppConfigFromState(state),
+        // Don't include appConfig yet - need confirmation first
         action: 'confirm',
       };
     }
 
-    // Generate contextual fallback questions
+    // Generate contextual fallback questions for low confidence
     const questions = this.generateFallbackQuestions(analysis);
     return {
       needsClarification: true,
       questions,
       state,
-      action: analysis.confidence >= 0.50 ? 'clarify' : 'deep_clarify',
+      action: cappedConfidence >= 0.50 ? 'clarify' : 'deep_clarify',
     };
   }
 
@@ -1210,6 +1295,40 @@ Should we proceed to build, or do you need more information?`;
       'general_business': 'Business',
     };
     return names[industry] || industry.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  /**
+   * Generate a human-readable summary of what we understand about the user's needs
+   * Used for confirmation messages to ensure accuracy before building
+   */
+  private summarizeUnderstanding(state: AIDiscoveryState): string {
+    const parts: string[] = [];
+    
+    if (state.detectedIndustry) {
+      parts.push(`a ${this.formatIndustryName(state.detectedIndustry)} business`);
+    }
+    
+    if (state.answers.team_size) {
+      parts.push(state.answers.team_size === 'solo' || state.answers.team_size === 'Just me' 
+        ? 'run solo' 
+        : 'with a team');
+    }
+    
+    if (state.detectedIntent) {
+      const intentDescriptions: Record<string, string> = {
+        'operations': 'focused on day-to-day operations',
+        'customer-facing': 'with customer-facing features',
+        'internal': 'for internal team use',
+        'hybrid': 'serving both team and customers',
+      };
+      parts.push(intentDescriptions[state.detectedIntent] || '');
+    }
+    
+    if (state.aiInterpretation) {
+      parts.push(`(${state.aiInterpretation})`);
+    }
+    
+    return parts.filter(Boolean).join(', ') || 'your business needs';
   }
 
   private generateAppConfigFromState(state: AIDiscoveryState): AppConfig {

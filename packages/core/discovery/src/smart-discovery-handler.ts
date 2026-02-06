@@ -1,11 +1,15 @@
 /**
  * Smart Discovery Handler
- * Uses AI-like understanding to intelligently skip questions when confidence is high
- * Implements the 4-tier confidence flow:
- * - >= 0.90: Auto-build
- * - 0.75-0.89: Show confirmation
- * - 0.50-0.74: Ask 1-2 questions
- * - < 0.50: Ask more questions
+ * 
+ * @deprecated This handler uses hardcoded confidence tiers that cause premature completion.
+ * 
+ * UPDATED: Confidence tiers have been raised to prevent generic app generation:
+ * - >= 0.95: Offer confirmation (changed from auto-build at 0.90)
+ * - 0.70-0.94: Show confirmation with explanation request
+ * - < 0.70: Continue asking questions
+ * 
+ * For new code, prefer using AIDiscoveryHandler or ConversationalDiscoveryHandler
+ * which have better AI integration and proper confirmation flows.
  */
 
 import type { ClarificationQuestion } from './discovery-service.js';
@@ -68,11 +72,19 @@ const TEAM_SIZE_KEYWORDS = {
   'team': ['team', 'staff', 'employees', 'crew', 'workers', 'company'],
 };
 
+/** Minimum confidence for auto-build - raised from 0.90 to prevent premature completion */
+const MIN_CONFIDENCE_AUTO = 0.95;
+/** Minimum confidence for confirmation offer - raised from 0.75 */
+const MIN_CONFIDENCE_CONFIRM = 0.70;
+
 export class SmartDiscoveryHandler {
-  private maxQuestions = 3;
+  /** @deprecated maxQuestions should not force early completion */
+  private maxQuestions = 10; // Increased from 3
 
   /**
    * Start discovery with intelligent analysis
+   * 
+   * UPDATED: No longer auto-builds at 0.90. Always requires confirmation.
    */
   startDiscovery(input: string): {
     needsClarification: boolean;
@@ -94,25 +106,34 @@ export class SmartDiscoveryHandler {
       originalInput: input,
     };
 
-    // 4-tier confidence flow
-    if (analysis.confidence >= 0.90) {
-      // Auto-build - high confidence
+    // UPDATED: Raised thresholds to prevent premature generic app generation
+    // No longer auto-builds - always requires confirmation even at high confidence
+    if (analysis.confidence >= MIN_CONFIDENCE_AUTO) {
+      // Changed: Always require confirmation, never auto-build
+      // This prevents generic apps from being forced on users
       const appConfig = this.generateAppConfig(state, analysis);
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true, // Changed from false
+        questions: this.getConfirmationQuestion(analysis),
         state,
         appConfig,
-        action: 'auto_build',
+        action: 'confirm', // Changed from 'auto_build'
       };
     }
 
-    if (analysis.confidence >= 0.75) {
-      // Confirmation - medium-high confidence
+    if (analysis.confidence >= MIN_CONFIDENCE_CONFIRM) {
+      // Confirmation with explanation request - ask what makes them unique
       const appConfig = this.generateAppConfig(state, analysis);
+      const industryName = this.formatIndustryName(analysis.industry);
       return {
         needsClarification: true,
-        questions: this.getConfirmationQuestion(analysis),
+        questions: [{
+          id: 'uniqueness',
+          question: `This looks like it might be for ${industryName}. What makes YOUR business different from a typical ${industryName}?`,
+          type: 'text',
+          required: true,
+          category: 'business',
+        }],
         state,
         appConfig,
         action: 'confirm',
@@ -120,7 +141,7 @@ export class SmartDiscoveryHandler {
     }
 
     if (analysis.confidence >= 0.50) {
-      // Clarify - medium confidence, ask 1-2 targeted questions
+      // Clarify - medium confidence, ask targeted questions
       return {
         needsClarification: true,
         questions: this.getTargetedQuestions(analysis, 2),
@@ -129,7 +150,7 @@ export class SmartDiscoveryHandler {
       };
     }
 
-    // Deep clarify - low confidence, start with context gate
+    // Deep clarify - low confidence, need more information
     return {
       needsClarification: true,
       questions: this.getInitialQuestions(analysis),
@@ -209,32 +230,48 @@ export class SmartDiscoveryHandler {
     // Recalculate confidence
     updatedState.confidence = this.recalculateConfidence(updatedState);
 
-    // Check if we've hit max questions
+    // REMOVED: Force-build at maxQuestions
+    // WHY: Arbitrary question limits cause premature generic app generation
+    // Instead, offer confirmation when we've asked many questions
     if (updatedState.questionsAsked >= this.maxQuestions) {
-      // Force build with what we have
+      console.warn(
+        `SmartDiscovery: ${updatedState.questionsAsked} questions asked. ` +
+        `Confidence: ${updatedState.confidence}. Offering confirmation instead of force-building.`
+      );
       const appConfig = this.generateAppConfigFromState(updatedState);
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true, // Changed from false
+        questions: [{
+          id: 'confirm_after_questions',
+          question: `I've gathered a lot of information. Before I build, is there anything unique about your business I should know?`,
+          type: 'text',
+          required: true,
+          category: 'confirmation',
+        }],
         state: updatedState,
         appConfig,
       };
     }
 
-    // Check if we have enough info now
-    if (updatedState.confidence >= 0.75) {
+    // UPDATED: Raised threshold and always require confirmation
+    if (updatedState.confidence >= MIN_CONFIDENCE_AUTO) {
       const appConfig = this.generateAppConfigFromState(updatedState);
       return {
-        needsClarification: false,
-        questions: [],
+        needsClarification: true, // Changed from false - always confirm
+        questions: [{
+          id: 'confirm_high_confidence',
+          question: `I think I understand what you need. Before I build, what makes your business unique?`,
+          type: 'text',
+          required: true,
+          category: 'confirmation',
+        }],
         state: updatedState,
         appConfig,
       };
     }
 
-    // Need more questions
-    const remainingQuestions = this.maxQuestions - updatedState.questionsAsked;
-    const questions = this.getNextQuestions(updatedState, Math.min(remainingQuestions, 2));
+    // Continue asking questions - no arbitrary limit
+    const questions = this.getNextQuestions(updatedState, 2);
 
     return {
       needsClarification: true,

@@ -22,6 +22,7 @@ import { StatsCard, StatsCardGrid } from './StatsCard';
 import { AreaChartCard } from './AreaChartCard';
 import { SimpleDataTable, type ColumnDef } from './SimpleDataTable';
 import { LoginForm } from './login-form';
+import { ScheduleCalendar } from './ScheduleCalendar';
 
 // Shadcn UI primitives
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
@@ -69,6 +70,8 @@ import { TwoColumn } from './layouts/TwoColumn';
 import { ThreeColumn } from './layouts/ThreeColumn';
 import { SidebarLayout, SidebarLeft, SidebarRight } from './layouts/SidebarLayout';
 import { DashboardGrid, DashboardGridItem } from './layouts/DashboardGrid';
+import { TopNavLayout, TopNavItem } from './layouts/TopNavLayout';
+import { MasterDetailLayout, MasterListItem } from './layouts/MasterDetailLayout';
 
 export interface ComponentProps {
   id?: string;
@@ -217,9 +220,32 @@ const ListComponent: React.FC<ComponentProps> = ({
     console.log(`🎯 Card action: ${actionType} on ${itemId} (entity: ${entity})`);
   };
 
-  if (items.length === 0) {
+  // Filter out items that don't have meaningful data (just ID or empty objects)
+  // WHY: Prevents rendering broken/skeleton-looking cards when data is incomplete
+  const validItems = items.filter((item: any) => {
+    if (!item || typeof item !== 'object') return false;
+    
+    // Check if item has at least one meaningful field (not just id/timestamps)
+    const meaningfulFields = ['name', 'title', 'label', 'email', 'phone', 'status', 'description', 'subject'];
+    const hasContent = meaningfulFields.some(field => 
+      item[field] && String(item[field]).trim().length > 0
+    );
+    
+    // Also accept items with at least 2 non-system fields with values
+    if (!hasContent) {
+      const systemFields = new Set(['id', '_id', 'createdAt', 'updatedAt', 'created_at', 'updated_at']);
+      const contentFields = Object.entries(item).filter(([key, value]) => 
+        !systemFields.has(key) && value !== null && value !== undefined && String(value).trim().length > 0
+      );
+      return contentFields.length >= 2;
+    }
+    
+    return hasContent;
+  });
+
+  if (validItems.length === 0) {
     return (
-      <div className="text-gray-500 text-sm italic py-4 bg-yellow-50 border border-solid border-yellow-200 rounded p-4" style={style as React.CSSProperties} {...restProps}>
+      <div className="text-muted-foreground text-sm italic py-4 bg-muted/50 border border-solid border-border rounded p-4" style={style as React.CSSProperties} {...restProps}>
         No items to display
         {sourceStr && <div className="text-xs mt-1">Looking for data source: "{sourceStr}"</div>}
       </div>
@@ -312,6 +338,8 @@ const ListComponent: React.FC<ComponentProps> = ({
           onClick: () => dispatchCardAction(a.label, item.id),
         }))}
         onClick={() => dispatchCardAction('View', item.id)}
+        compact={Boolean(compact)}
+        hideImagePlaceholder={true}
       />
     );
   };
@@ -447,23 +475,23 @@ const ListComponent: React.FC<ComponentProps> = ({
 
     const getStatusColor = (status: string): string => {
       const s = String(status).toLowerCase().replace(/[_-]/g, '');
-      // Green - positive/complete states
+      // Green - positive/complete states (uses --success token)
       if (['active', 'completed', 'paid', 'approved', 'done', 'confirmed', 'delivered', 'checkedin', 'instock'].some(x => s.includes(x))) {
-        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+        return 'bg-[hsl(var(--success-bg,142_76%_95%))] text-[hsl(var(--success,142_71%_45%))] dark:bg-[hsl(var(--success)/0.2)] dark:text-[hsl(var(--success))]';
       }
-      // Yellow - in-progress/waiting states
+      // Yellow - in-progress/waiting states (uses --warning token)
       if (['pending', 'waiting', 'processing', 'scheduled', 'inprogress', 'new', 'draft', 'booked'].some(x => s.includes(x))) {
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
+        return 'bg-[hsl(var(--warning-bg,45_93%_95%))] text-[hsl(var(--warning,45_93%_47%))] dark:bg-[hsl(var(--warning)/0.2)] dark:text-[hsl(var(--warning))]';
       }
-      // Blue - informational states
+      // Blue - informational states (uses --info token)
       if (['trial', 'frozen', 'reserved', 'sent'].some(x => s.includes(x))) {
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+        return 'bg-[hsl(var(--info-bg,201_96%_95%))] text-[hsl(var(--info,201_96%_32%))] dark:bg-[hsl(var(--info)/0.2)] dark:text-[hsl(var(--info))]';
       }
-      // Red - negative states
+      // Red - negative states (uses --destructive/error token)
       if (['cancelled', 'rejected', 'failed', 'expired', 'inactive', 'overdue', 'noshow', 'outofstock'].some(x => s.includes(x))) {
-        return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+        return 'bg-[hsl(var(--error-bg,0_84%_95%))] text-[hsl(var(--error,0_84%_60%))] dark:bg-[hsl(var(--destructive)/0.2)] dark:text-[hsl(var(--destructive))]';
       }
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+      return 'bg-muted text-muted-foreground';
     };
 
     // Format status label (convert snake_case to Title Case)
@@ -561,9 +589,12 @@ const ListComponent: React.FC<ComponentProps> = ({
       : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
     : 'space-y-3';
 
+  // Apply limit if specified
+  const displayItems = limit ? validItems.slice(0, Number(limit)) : validItems;
+
   return (
     <div className={gridClass} style={style as React.CSSProperties} {...restProps}>
-      {items.map((item: any, index: number) => {
+      {displayItems.map((item: any, index: number) => {
         if (cardType === 'personCard') {
           return renderPersonCard(item, index);
         }
@@ -639,7 +670,7 @@ const CalendarComponent: React.FC<ComponentProps> = ({
 
   if (items.length === 0) {
     return (
-      <div className="text-gray-500 text-sm italic py-4 bg-yellow-50 border border-solid border-yellow-200 rounded p-4" style={style as React.CSSProperties} {...restProps}>
+      <div className="text-muted-foreground text-sm italic py-4 bg-muted/50 border border-solid border-border rounded p-4" style={style as React.CSSProperties} {...restProps}>
         No appointments to display
       </div>
     );
@@ -652,9 +683,9 @@ const CalendarComponent: React.FC<ComponentProps> = ({
           <h3 className="text-sm font-semibold text-muted-foreground mb-3">{date}</h3>
           <div className="space-y-2">
             {groupItems.map((item, index) => (
-              <div key={String(item.id || index)} className="flex items-center justify-between text-sm text-gray-800">
+              <div key={String(item.id || index)} className="flex items-center justify-between text-sm text-foreground">
                 <span className="font-medium">{String(item[titleField as string] || 'Appointment')}</span>
-                <span className="text-gray-500">{String(item.location || item.address || '')}</span>
+                <span className="text-muted-foreground">{String(item.location || item.address || '')}</span>
               </div>
             ))}
           </div>
@@ -697,7 +728,7 @@ const KanbanComponent: React.FC<ComponentProps> = ({
 
   if (items.length === 0) {
     return (
-      <div className="text-gray-500 text-sm italic py-4 bg-yellow-50 border border-solid border-yellow-200 rounded p-4" style={style as React.CSSProperties} {...restProps}>
+      <div className="text-muted-foreground text-sm italic py-4 bg-muted/50 border border-solid border-border rounded p-4" style={style as React.CSSProperties} {...restProps}>
         No items to display
       </div>
     );
@@ -714,8 +745,8 @@ const KanbanComponent: React.FC<ComponentProps> = ({
             </div>
             <div className="space-y-2">
               {columnItems.map((item, index) => (
-                <div key={String(item.id || index)} className="border border-solid border-gray-200 rounded-md p-2 text-sm">
-                  <div className="font-semibold text-gray-900">
+                <div key={String(item.id || index)} className="border border-solid border-border rounded-md p-2 text-sm">
+                  <div className="font-semibold text-foreground">
                     {String(item[titleField as string] || 'Item')}
                   </div>
                 </div>
@@ -864,7 +895,7 @@ const TableComponent: React.FC<ComponentProps> = ({
 
   if (items.length === 0) {
     return (
-      <div className="text-gray-500 text-sm italic py-4" style={style as React.CSSProperties} {...restProps}>
+      <div className="text-muted-foreground text-sm italic py-4" style={style as React.CSSProperties} {...restProps}>
         No data to display
       </div>
     );
@@ -877,31 +908,31 @@ const TableComponent: React.FC<ComponentProps> = ({
           <tr>
             {cols.length > 0 ? (
               cols.map((col: any, idx: number) => (
-                <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   {String(col.label || col.name || col)}
                 </th>
               ))
             ) : (
               Object.keys(items[0] || {}).map((key) => (
-                <th key={key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th key={key} className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   {key}
                 </th>
               ))
             )}
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="bg-card divide-y divide-border">
           {items.map((item: any, idx: number) => (
             <tr key={item?.id || idx} className="hover:bg-muted/50">
               {cols.length > 0 ? (
                 cols.map((col: any, colIdx: number) => (
-                  <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
                     {String(item[col.field || col.key || col] || '')}
                   </td>
                 ))
               ) : (
                 Object.values(item || {}).map((value: any, valIdx: number) => (
-                  <td key={valIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td key={valIdx} className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
                     {String(value)}
                   </td>
                 ))
@@ -948,12 +979,12 @@ const ChartComponent: React.FC<ComponentProps> = ({
     <div className="bg-card border rounded-lg p-6" style={style as React.CSSProperties} {...restProps}>   
       {title != null && String(title) && <h3 className="text-lg font-semibold mb-4 text-foreground">{String(title)}</h3>}
       <div className="h-64 flex items-center justify-center bg-muted rounded-md border-2 border-dashed border-border">
-        <div className="text-center text-gray-500">
+        <div className="text-center text-muted-foreground">
           <div className="text-2xl mb-2">📊</div>
           <div className="text-sm font-medium">Chart: {String(type || 'bar')}</div>
           <div className="text-xs mt-1">Chart visualization (placeholder)</div>
           {dataKeys.length > 0 && (
-            <div className="text-xs mt-2 text-gray-400">
+            <div className="text-xs mt-2 text-muted-foreground/70">
               Data points: {dataKeys.length}
             </div>
           )}
@@ -1022,8 +1053,8 @@ const ImageComponent: React.FC<ComponentProps> = ({
       ...(style && typeof style === 'object' && !Array.isArray(style) ? style as React.CSSProperties : {}),
     };
     return (
-      <div className="bg-gray-100 border border-solid border-gray-200 rounded-lg flex items-center justify-center" style={fallbackStyle} {...restProps}>
-        <span className="text-gray-400 text-sm">No image source</span>
+      <div className="bg-muted border border-solid border-border rounded-lg flex items-center justify-center" style={fallbackStyle} {...restProps}>
+        <span className="text-muted-foreground text-sm">No image source</span>
       </div>
     );
   }
@@ -1060,8 +1091,8 @@ const VideoComponent: React.FC<ComponentProps> = ({
       ...(style && typeof style === 'object' && !Array.isArray(style) ? style as React.CSSProperties : {}),
     };
     return (
-      <div className="bg-gray-100 border border-solid border-gray-200 rounded-lg flex items-center justify-center" style={fallbackStyle} {...restProps}>
-        <span className="text-gray-400 text-sm">No video source</span>
+      <div className="bg-muted border border-solid border-border rounded-lg flex items-center justify-center" style={fallbackStyle} {...restProps}>
+        <span className="text-muted-foreground text-sm">No video source</span>
       </div>
     );
   }
@@ -1123,7 +1154,7 @@ const GalleryComponent: React.FC<ComponentProps> = ({
 
   if (items.length === 0) {
     return (
-      <div className="text-gray-500 text-sm italic py-4 bg-yellow-50 border border-solid border-yellow-200 rounded p-4" style={style as React.CSSProperties} {...restProps}>
+      <div className="text-muted-foreground text-sm italic py-4 bg-muted/50 border border-solid border-border rounded p-4" style={style as React.CSSProperties} {...restProps}>
         No images to display
       </div>
     );
@@ -1147,7 +1178,7 @@ const GalleryComponent: React.FC<ComponentProps> = ({
           return (
             <div 
               key={item?.id || index} 
-              className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity group"
+              className="relative aspect-square bg-muted rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity group"
               onClick={() => setSelectedIndex(index)}
             >
               {imgSrc ? (
@@ -1157,7 +1188,7 @@ const GalleryComponent: React.FC<ComponentProps> = ({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-400">
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground">
                   <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
@@ -1268,7 +1299,7 @@ const ChatComponent: React.FC<ComponentProps> = ({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
-          <div className="text-gray-400 text-center text-sm py-8">No messages yet</div>
+          <div className="text-muted-foreground text-center text-sm py-8">No messages yet</div>
         ) : (
           messages.map((msg: any, index: number) => {
             const sender = msg[senderField as string] || 'Unknown';
@@ -1305,7 +1336,7 @@ const ChatComponent: React.FC<ComponentProps> = ({
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-200 p-3 flex gap-2">
+      <div className="border-t border-border p-3 flex gap-2">
         <input
           type="text"
           value={newMessage}
@@ -1384,7 +1415,7 @@ const MapComponent: React.FC<ComponentProps> = ({
   // In production, this would integrate with Mapbox, Google Maps, or Leaflet
   return (
     <div 
-      className="bg-gradient-to-br from-blue-50 to-green-50 border border-solid border-gray-200 rounded-lg overflow-hidden relative"
+      className="bg-muted/30 border border-solid border-border rounded-lg overflow-hidden relative"
       style={{ height: mapHeight, ...(style as React.CSSProperties) }}
       {...restProps}
     >
@@ -1393,7 +1424,7 @@ const MapComponent: React.FC<ComponentProps> = ({
         <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
           <defs>
             <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-              <path d="M 10 0 L 0 0 0 10" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-gray-400" />
+              <path d="M 10 0 L 0 0 0 10" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-muted-foreground" />
             </pattern>
           </defs>
           <rect width="100" height="100" fill="url(#grid)" />
@@ -1409,7 +1440,7 @@ const MapComponent: React.FC<ComponentProps> = ({
             <div className="text-xs text-muted-foreground">
               Center: {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
             </div>
-            <div className="text-xs text-gray-500">Zoom: {String(zoom)}</div>
+            <div className="text-xs text-muted-foreground">Zoom: {String(zoom)}</div>
           </div>
         </div>
       </div>
@@ -1417,10 +1448,10 @@ const MapComponent: React.FC<ComponentProps> = ({
       {/* Markers list */}
       {markers.length > 0 && (
         <div className="absolute top-3 left-3 bg-background/90 backdrop-blur rounded-md border max-h-48 overflow-y-auto">
-          <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase">
+          <div className="px-3 py-2 border-b border-border text-xs font-semibold text-muted-foreground uppercase">
             {markers.length} Location{markers.length !== 1 ? 's' : ''}
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border">
             {markers.slice(0, 5).map((marker: any, index: number) => (
               <div key={marker?.id || index} className="px-3 py-2 text-sm flex items-center gap-2">
                 <span className="text-red-500">📍</span>
@@ -1507,7 +1538,7 @@ const SectionComponent: React.FC<ComponentProps> = ({
       {...restProps}
     >
       {title != null && String(title) && (
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">{String(title)}</h2>
+        <h2 className="text-xl font-semibold text-foreground mb-4">{String(title)}</h2>
       )}
       {children as React.ReactNode}
     </section>
@@ -1722,7 +1753,7 @@ function getStatsIcon(icon: unknown): React.ReactNode | undefined {
   return undefined;
 }
 
-// Stats Card Component - KPI display
+// Stats Card Component - KPI display with data aggregation
 const StatsCardComponent: React.FC<ComponentProps> = ({
   title,
   value,
@@ -1733,6 +1764,12 @@ const StatsCardComponent: React.FC<ComponentProps> = ({
   currency,
   currencySymbol,
   onClick,
+  // Data aggregation props
+  data,
+  source,
+  field,
+  aggregation,
+  format,
   ...otherProps
 }) => {
   const { id, style, className, ...restProps } = otherProps;
@@ -1740,15 +1777,75 @@ const StatsCardComponent: React.FC<ComponentProps> = ({
   // Convert string icon to Lucide component
   const resolvedIcon = getStatsIcon(icon);
   
+  // Compute aggregated value from data if source and aggregation are provided
+  let computedValue: string | number = value as string | number;
+  
+  if (data && source && aggregation) {
+    const sourceData = (data as Record<string, unknown[]>)?.[String(source)];
+    
+    if (Array.isArray(sourceData) && sourceData.length > 0) {
+      switch (aggregation) {
+        case 'count':
+          computedValue = sourceData.length;
+          break;
+        case 'sum':
+          if (field) {
+            computedValue = sourceData.reduce((sum: number, item: any) => {
+              const val = parseFloat(item?.[field as string]) || 0;
+              return sum + val;
+            }, 0);
+          }
+          break;
+        case 'avg':
+        case 'average':
+          if (field) {
+            const total = sourceData.reduce((sum: number, item: any) => {
+              const val = parseFloat(item?.[field as string]) || 0;
+              return sum + val;
+            }, 0);
+            computedValue = sourceData.length > 0 ? total / sourceData.length : 0;
+          }
+          break;
+        case 'min':
+          if (field) {
+            computedValue = Math.min(...sourceData.map((item: any) => parseFloat(item?.[field as string]) || 0));
+          }
+          break;
+        case 'max':
+          if (field) {
+            computedValue = Math.max(...sourceData.map((item: any) => parseFloat(item?.[field as string]) || 0));
+          }
+          break;
+        default:
+          // Keep the static value
+          break;
+      }
+    } else {
+      // No data for this source - show 0 for count, or keep the original value
+      if (aggregation === 'count') {
+        computedValue = 0;
+      }
+    }
+  }
+  
+  // Format the computed value
+  const isCurrency = format === 'currency' || Boolean(currency);
+  const symbol = currencySymbol as string || '$';
+  
+  let displayValue: string | number = computedValue;
+  if (isCurrency && typeof computedValue === 'number') {
+    displayValue = `${symbol}${computedValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  
   return (
     <StatsCard
       title={String(title || 'Stat')}
-      value={value as string | number}
+      value={displayValue}
       change={change as number | undefined}
       description={description as string | undefined}
       subDescription={subDescription as string | undefined}
       icon={resolvedIcon}
-      currency={Boolean(currency)}
+      currency={false} // Already formatted above
       currencySymbol={currencySymbol as string | undefined}
       onClick={onClick as (() => void) | undefined}
       className={className as string | undefined}
@@ -1773,6 +1870,163 @@ const StatsCardGridComponent: React.FC<ComponentProps> = ({
     </StatsCardGrid>
   );
 };
+
+// Activity Feed Component - shows recent changes across entities
+// WHY: Activity feeds make dashboards feel "alive" by showing real-time updates
+const ActivityFeedComponent: React.FC<ComponentProps> = ({
+  data,
+  source,
+  sources,
+  limit = 5,
+  title = 'Recent Activity',
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  // Collect items from all sources
+  const dataObj = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown[]>)
+    : undefined;
+  
+  // Get source list - can be a single source or array of sources
+  const sourceList = Array.isArray(sources) 
+    ? sources.map(String)
+    : source 
+      ? [String(source)]
+      : dataObj 
+        ? Object.keys(dataObj).slice(0, 3)  // Default to first 3 entities
+        : [];
+  
+  // Aggregate items from all sources with metadata
+  interface ActivityItem {
+    id: string;
+    entityType: string;
+    entityName: string;
+    action: string;
+    timestamp: Date;
+    displayName: string;
+    icon: string;
+  }
+  
+  const activities: ActivityItem[] = [];
+  
+  for (const sourceKey of sourceList) {
+    const items = dataObj?.[sourceKey];
+    if (!Array.isArray(items)) continue;
+    
+    // Get entity display name (capitalize, singularize)
+    const entityName = sourceKey.charAt(0).toUpperCase() + 
+      sourceKey.slice(1).replace(/s$/, '');
+    
+    // Get icon based on entity type
+    const icon = getActivityIcon(sourceKey);
+    
+    for (const item of items.slice(0, Number(limit))) {
+      const record = item as Record<string, unknown>;
+      const itemId = String(record.id || record._id || Math.random());
+      const itemName = String(record.name || record.title || `${entityName} #${itemId.slice(-4)}`);
+      
+      // Try to get timestamp
+      const createdAt = record.createdAt || record.created_at || record.timestamp;
+      const timestamp = createdAt ? new Date(String(createdAt)) : new Date();
+      
+      activities.push({
+        id: `${sourceKey}-${itemId}`,
+        entityType: sourceKey,
+        entityName,
+        action: 'created',
+        timestamp,
+        displayName: itemName,
+        icon,
+      });
+    }
+  }
+  
+  // Sort by timestamp (newest first) and limit
+  activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  const displayedActivities = activities.slice(0, Number(limit));
+  
+  // Format time ago
+  const timeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+  
+  if (displayedActivities.length === 0) {
+    return (
+      <div 
+        className={`bg-card border rounded-lg p-4 ${className || ''}`}
+        style={style as React.CSSProperties}
+        {...restProps}
+      >
+        <h3 className="font-semibold text-lg mb-3">{String(title)}</h3>
+        <p className="text-sm text-muted-foreground">No recent activity</p>
+      </div>
+    );
+  }
+  
+  return (
+    <div 
+      className={`bg-card border rounded-lg p-4 ${className || ''}`}
+      style={style as React.CSSProperties}
+      {...restProps}
+    >
+      <h3 className="font-semibold text-lg mb-3">{String(title)}</h3>
+      <div className="space-y-3">
+        {displayedActivities.map((activity) => (
+          <div 
+            key={activity.id}
+            className="flex items-center gap-3 text-sm"
+          >
+            <span className="text-lg flex-shrink-0">{activity.icon}</span>
+            <div className="flex-1 min-w-0">
+              <span className="font-medium">{activity.displayName}</span>
+              <span className="text-muted-foreground"> was {activity.action}</span>
+            </div>
+            <span className="text-xs text-muted-foreground flex-shrink-0">
+              {timeAgo(activity.timestamp)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Helper to get activity icon based on entity type
+function getActivityIcon(entityType: string): string {
+  const typeLower = entityType.toLowerCase();
+  
+  if (['member', 'client', 'customer', 'patient', 'user', 'employee'].some(k => typeLower.includes(k))) {
+    return '👤';
+  }
+  if (['invoice', 'payment', 'order'].some(k => typeLower.includes(k))) {
+    return '💰';
+  }
+  if (['appointment', 'booking', 'reservation', 'job'].some(k => typeLower.includes(k))) {
+    return '📅';
+  }
+  if (['product', 'item', 'inventory'].some(k => typeLower.includes(k))) {
+    return '📦';
+  }
+  if (['task', 'project', 'ticket'].some(k => typeLower.includes(k))) {
+    return '✅';
+  }
+  if (['message', 'note', 'comment'].some(k => typeLower.includes(k))) {
+    return '💬';
+  }
+  
+  return '📋';
+}
 
 // Area Chart Component
 const AreaChartComponent: React.FC<ComponentProps> = ({
@@ -1889,19 +2143,19 @@ const DataTableComponent: React.FC<ComponentProps> = ({
       const strValue = String(value);
       const fieldLower = (fieldName || '').toLowerCase();
       
-      // Badge format for status fields
+      // Badge format for status fields - uses semantic color tokens
       if (format === 'badge' || fieldLower === 'status' || fieldLower === 'state') {
         const statusLower = strValue.toLowerCase().replace(/[_-]/g, '');
-        let badgeClass = 'bg-gray-100 text-gray-800';
+        let badgeClass = 'bg-muted text-muted-foreground';
         
         if (['active', 'completed', 'paid', 'approved', 'done', 'confirmed', 'delivered'].some(s => statusLower.includes(s))) {
-          badgeClass = 'bg-green-100 text-green-800';
+          badgeClass = 'bg-[hsl(var(--success-bg,142_76%_95%))] text-[hsl(var(--success,142_71%_45%))] dark:bg-[hsl(var(--success)/0.2)] dark:text-[hsl(var(--success))]';
         } else if (['pending', 'waiting', 'processing', 'scheduled', 'new', 'draft', 'booked'].some(s => statusLower.includes(s))) {
-          badgeClass = 'bg-yellow-100 text-yellow-800';
+          badgeClass = 'bg-[hsl(var(--warning-bg,45_93%_95%))] text-[hsl(var(--warning,45_93%_47%))] dark:bg-[hsl(var(--warning)/0.2)] dark:text-[hsl(var(--warning))]';
         } else if (['cancelled', 'rejected', 'failed', 'expired', 'inactive', 'overdue'].some(s => statusLower.includes(s))) {
-          badgeClass = 'bg-red-100 text-red-800';
+          badgeClass = 'bg-[hsl(var(--error-bg,0_84%_95%))] text-[hsl(var(--error,0_84%_60%))] dark:bg-[hsl(var(--destructive)/0.2)] dark:text-[hsl(var(--destructive))]';
         } else if (['trial', 'frozen', 'reserved', 'sent'].some(s => statusLower.includes(s))) {
-          badgeClass = 'bg-blue-100 text-blue-800';
+          badgeClass = 'bg-[hsl(var(--info-bg,201_96%_95%))] text-[hsl(var(--info,201_96%_32%))] dark:bg-[hsl(var(--info)/0.2)] dark:text-[hsl(var(--info))]';
         }
         
         const displayValue = strValue.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -2054,6 +2308,140 @@ const LoginFormComponent: React.FC<ComponentProps> = ({
     <LoginForm className={className as string | undefined} />
   );
 };
+
+// Schedule Calendar Component - Full calendar with month/week/day views
+// WHY: The basic CalendarComponent only shows a grouped list. This is a proper
+// scheduling calendar needed for production tasks, delivery scheduling, catering, etc.
+const ScheduleCalendarComponent: React.FC<ComponentProps> = ({
+  data,
+  source,
+  dateField = 'date',
+  titleField = 'title',
+  timeField = 'time',
+  endTimeField = 'endTime',
+  typeField = 'type',
+  statusField = 'status',
+  customerField = 'customer',
+  locationField = 'location',
+  colorField = 'color',
+  primaryColor,
+  onEventClick,
+  onAddEvent,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  // Extract events from data source
+  const dataObj = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown[]>)
+    : undefined;
+  const sourceStr = String(source || '').trim();
+  
+  let items: unknown[] = [];
+  if (dataObj && sourceStr) {
+    const sourceData = dataObj[sourceStr];
+    items = Array.isArray(sourceData) ? sourceData : [];
+  }
+  
+  // If no source specified, try common event-related entity names
+  if (items.length === 0 && dataObj) {
+    const eventKeys = ['events', 'appointments', 'schedules', 'tasks', 'deliveries', 'bookings', 'orders', 'productions'];
+    for (const key of eventKeys) {
+      if (dataObj[key] && Array.isArray(dataObj[key])) {
+        items = dataObj[key] as unknown[];
+        break;
+      }
+    }
+  }
+  
+  // Transform items to CalendarEvent format
+  const events = items.map((item: any, index: number) => ({
+    id: String(item.id || index),
+    title: String(item[titleField as string] || item.name || item.title || 'Event'),
+    date: item[dateField as string] 
+      ? (typeof item[dateField as string] === 'string' 
+          ? item[dateField as string].split('T')[0] 
+          : new Date(item[dateField as string]).toISOString().split('T')[0])
+      : new Date().toISOString().split('T')[0],
+    time: item[timeField as string] || undefined,
+    endTime: item[endTimeField as string] || undefined,
+    type: item[typeField as string] || undefined,
+    status: item[statusField as string] || undefined,
+    customer: item[customerField as string] || item.customerName || undefined,
+    location: item[locationField as string] || item.address || undefined,
+    color: item[colorField as string] || getEventColor(item[typeField as string] || item[statusField as string]),
+  }));
+  
+  // Handle event click - dispatch card action
+  const handleEventClick = (event: any) => {
+    if (onEventClick && typeof onEventClick === 'function') {
+      (onEventClick as (e: any) => void)(event);
+    } else {
+      // Default: dispatch card action for viewing
+      const cardEvent = new CustomEvent('neo-card-action', {
+        detail: {
+          action: 'View',
+          itemId: event.id,
+          entityId: sourceStr || 'event',
+          source: 'calendar',
+        },
+        bubbles: true,
+      });
+      window.dispatchEvent(cardEvent);
+    }
+  };
+  
+  // Handle add event
+  const handleAddEvent = (date: Date) => {
+    if (onAddEvent && typeof onAddEvent === 'function') {
+      (onAddEvent as (d: Date) => void)(date);
+    } else {
+      // Default: dispatch add action
+      const addEvent = new CustomEvent('neo-card-action', {
+        detail: {
+          action: 'Add',
+          entityId: sourceStr || 'event',
+          source: 'calendar',
+          params: { date: date.toISOString() },
+        },
+        bubbles: true,
+      });
+      window.dispatchEvent(addEvent);
+    }
+  };
+  
+  return (
+    <ScheduleCalendar
+      events={events}
+      onEventClick={handleEventClick}
+      onAddEvent={handleAddEvent}
+      primaryColor={primaryColor as string | undefined}
+    />
+  );
+};
+
+// Helper to get event color based on type or status
+function getEventColor(typeOrStatus?: string): string {
+  if (!typeOrStatus) return '#6366f1'; // default indigo
+  
+  const value = String(typeOrStatus).toLowerCase();
+  
+  // Status-based colors
+  if (['completed', 'done', 'delivered', 'paid'].some(s => value.includes(s))) return '#10b981'; // green
+  if (['pending', 'new', 'waiting'].some(s => value.includes(s))) return '#f59e0b'; // amber
+  if (['in_progress', 'processing', 'production'].some(s => value.includes(s))) return '#3b82f6'; // blue
+  if (['cancelled', 'failed', 'rejected'].some(s => value.includes(s))) return '#ef4444'; // red
+  if (['scheduled', 'confirmed', 'booked'].some(s => value.includes(s))) return '#8b5cf6'; // purple
+  
+  // Type-based colors
+  if (['delivery', 'shipping'].some(s => value.includes(s))) return '#06b6d4'; // cyan
+  if (['catering', 'event'].some(s => value.includes(s))) return '#ec4899'; // pink
+  if (['meeting', 'call'].some(s => value.includes(s))) return '#3b82f6'; // blue
+  if (['production', 'prep', 'baking'].some(s => value.includes(s))) return '#f97316'; // orange
+  if (['pickup', 'takeout'].some(s => value.includes(s))) return '#84cc16'; // lime
+  
+  return '#6366f1'; // default indigo
+}
 
 // Progress Bar Component
 const ProgressBarComponent: React.FC<ComponentProps> = ({
@@ -2217,6 +2605,69 @@ const DashboardGridLayout: React.FC<ComponentProps> = ({
   );
 };
 
+const TopNavLayoutComponent: React.FC<ComponentProps> = ({
+  children,
+  nav,
+  secondaryNav,
+  navHeight,
+  maxWidth,
+  padding,
+  navStyle,
+  sticky,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <TopNavLayout
+      nav={nav as React.ReactNode}
+      secondaryNav={secondaryNav as React.ReactNode}
+      navHeight={navHeight as 'sm' | 'md' | 'lg' | undefined}
+      maxWidth={maxWidth as 'sm' | 'md' | 'lg' | 'xl' | '2xl' | 'full' | undefined}
+      padding={padding as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      navStyle={navStyle as 'solid' | 'transparent' | 'blur' | undefined}
+      sticky={sticky !== false}
+      className={className as string | undefined}
+    >
+      {children as React.ReactNode}
+    </TopNavLayout>
+  );
+};
+
+const MasterDetailLayoutComponent: React.FC<ComponentProps> = ({
+  master,
+  detail,
+  hasSelection,
+  onBack,
+  masterWidth,
+  gap,
+  padding,
+  showDivider,
+  emptyDetail,
+  masterHeader,
+  detailHeader,
+  ...otherProps
+}) => {
+  const { id, style, className, ...restProps } = otherProps;
+  
+  return (
+    <MasterDetailLayout
+      master={master as React.ReactNode}
+      detail={detail as React.ReactNode}
+      hasSelection={Boolean(hasSelection)}
+      onBack={onBack as (() => void) | undefined}
+      masterWidth={masterWidth as 'narrow' | 'medium' | 'wide' | undefined}
+      gap={gap as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      padding={padding as 'none' | 'sm' | 'md' | 'lg' | undefined}
+      showDivider={showDivider !== false}
+      emptyDetail={emptyDetail as React.ReactNode}
+      masterHeader={masterHeader as React.ReactNode}
+      detailHeader={detailHeader as React.ReactNode}
+      className={className as string | undefined}
+    />
+  );
+};
+
 // Component Registry Map
 export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   // Basic components
@@ -2235,6 +2686,9 @@ export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   personCard: PersonCardComponent,
   itemCard: ItemCardComponent,
   calendar: CalendarComponent,
+  scheduleCalendar: ScheduleCalendarComponent,  // Full calendar with month/week/day views
+  fullCalendar: ScheduleCalendarComponent,      // Alias
+  eventCalendar: ScheduleCalendarComponent,     // Alias
   kanban: KanbanComponent,
   gallery: GalleryComponent,
   chart: ChartComponent,
@@ -2280,6 +2734,10 @@ export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   dataTable: DataTableComponent,
   advancedTable: DataTableComponent, // alias
   
+  // Activity Feed
+  activityFeed: ActivityFeedComponent,
+  recentActivity: ActivityFeedComponent, // alias
+  
   // Auth
   loginForm: LoginFormComponent,
   
@@ -2294,6 +2752,11 @@ export const COMPONENT_REGISTRY: Record<string, React.FC<ComponentProps>> = {
   singleColumn: SingleColumnLayout,
   twoColumn: TwoColumnLayout,
   dashboardGrid: DashboardGridLayout,
+  topNav: TopNavLayoutComponent,
+  topNavLayout: TopNavLayoutComponent, // alias
+  masterDetail: MasterDetailLayoutComponent,
+  masterDetailLayout: MasterDetailLayoutComponent, // alias
+  listDetail: MasterDetailLayoutComponent, // alias
 };
 
 export function getComponent(componentId: string): React.FC<ComponentProps> {

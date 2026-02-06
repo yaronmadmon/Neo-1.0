@@ -157,6 +157,19 @@ export const EntityDefSchema = z.object({
 export type EntityDef = z.infer<typeof EntityDefSchema>;
 
 // ============================================================
+// SURFACE TYPES (Internal vs Customer-Facing)
+// ============================================================
+
+export const SurfaceTypeEnum = z.enum([
+  'admin',      // Internal/staff-facing pages
+  'provider',   // Provider-facing pages (doctors, therapists, etc.)
+  'customer',   // Customer-facing pages (public or authenticated customers)
+  'patient',    // Patient-facing pages (alias for customer in medical apps)
+]);
+
+export type SurfaceType = z.infer<typeof SurfaceTypeEnum>;
+
+// ============================================================
 // PAGE TYPES
 // ============================================================
 
@@ -175,6 +188,53 @@ export const PageTypeEnum = z.enum([
   'chat',
   'messaging',
   'custom',
+  'profile',        // User/customer profile page
+  // Customer-specific page types (e-commerce)
+  'menu',           // Product/service catalog for customers
+  'cart',           // Shopping cart
+  'checkout',       // Checkout/payment
+  'booking',        // Appointment/reservation booking
+  'order_tracking', // Customer order status tracking
+  'customer_portal', // Customer dashboard/home
+  // Catering/quote page types (bakery, restaurant, event catering)
+  'catering_request',  // Submit catering request form
+  'quote_view',        // View and approve quotes
+  'invoice_view',      // View and pay invoices
+  'delivery_schedule', // View delivery schedule/tracking
+  // Tenant/member portal page types
+  'tenant_portal',       // Tenant home/dashboard
+  'lease_view',          // Lease/contract details view
+  'rent_payment',        // Rent/dues payment page
+  'maintenance_request', // Maintenance request submission/tracking
+  'document_library',    // Documents view/download
+  'notices_board',       // Notices/announcements board
+  'message_center',      // Messaging/communication center
+  'facility_booking',    // Facility/amenity reservation
+  // Medical/healthcare page types (provider surface)
+  'provider_dashboard',  // Provider dashboard with schedule and patients
+  'patient_list',        // List of assigned patients
+  'patient_chart',       // Patient chart/record view
+  'treatment_notes',     // Create/view treatment notes (write-once)
+  'provider_schedule',   // Provider's appointment schedule
+  'provider_availability', // Set availability slots
+  // Medical/healthcare page types (patient surface)
+  'patient_portal',      // Patient home/dashboard
+  'my_appointments',     // Patient's appointments view/booking
+  'my_records',          // Patient's medical records (approved only)
+  'my_billing',          // Patient's billing/payments
+  'intake_forms',        // Patient intake forms
+  'prescription_view',   // View prescriptions
+  // Construction/contractor page types (field staff surface)
+  'project_list',        // List of assigned projects
+  'project_detail',      // Project details view
+  'daily_reports',       // Create/view daily site reports
+  'issue_list',          // List/report project issues
+  'material_request',    // Request materials
+  // Construction/contractor page types (client surface)
+  'client_portal',       // Client home/project overview
+  'project_status',      // Project status and timeline
+  'change_order_approval', // Review and approve change orders
+  'estimate_view',       // View project estimates
 ]);
 
 export type PageType = z.infer<typeof PageTypeEnum>;
@@ -240,6 +300,10 @@ export const PageDefSchema = z.object({
   route: z.string(),
   type: PageTypeEnum,
   icon: z.string().optional(),
+  
+  // Surface - determines if this page is internal (admin) or customer-facing
+  // Pages without a surface default to 'admin'
+  surface: SurfaceTypeEnum.optional(),  // Optional for backward compatibility, defaults to 'admin'
   
   // Entity binding
   entity: z.string().optional(),
@@ -387,6 +451,22 @@ export type NavigationRule = z.infer<typeof NavigationRuleSchema>;
 // APP BLUEPRINT (MAIN SCHEMA)
 // ============================================================
 
+// Navigation item schema (reusable for admin and customer)
+const NavigationItemSchema = z.object({
+  pageId: z.string(),
+  icon: z.string().optional(),
+  label: z.string(),
+  badge: z.string().optional(),
+});
+
+// Sidebar schema (reusable for admin and customer)
+const SidebarSchema = z.object({
+  enabled: z.boolean().default(true),
+  position: z.enum(['left', 'right']).default('left'),
+  collapsible: z.boolean().default(true),
+  items: z.array(NavigationItemSchema),
+});
+
 export const AppBlueprintSchema = z.object({
   // Metadata
   id: z.string(),
@@ -394,34 +474,89 @@ export const AppBlueprintSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   
+  // Branding
+  branding: z.object({
+    logo: z.string().optional(), // URL to logo image (initials-based by default)
+    logoText: z.string().optional(), // Text/initials for the logo
+    tagline: z.string().optional(),
+  }).optional(),
+  
   // Behavior/Kit identifier
   behavior: z.string().optional(), // e.g., 'crm', 'inventory', 'fitness'
   
-  // Entities (Tables)
+  // Surfaces configuration - which surfaces are enabled for this app
+  // Optional for backward compatibility
+  surfaces: z.object({
+    admin: z.object({
+      enabled: z.boolean().default(true),
+      defaultPage: z.string().optional(),
+    }).default({ enabled: true }),
+    customer: z.object({
+      enabled: z.boolean().default(false),
+      defaultPage: z.string().optional(),
+      // Customer surface features
+      features: z.object({
+        browseCatalog: z.boolean().optional(),      // Can browse products/services
+        placeOrders: z.boolean().optional(),        // Can place orders
+        bookAppointments: z.boolean().optional(),   // Can book appointments
+        trackOrders: z.boolean().optional(),        // Can track order status
+        manageProfile: z.boolean().optional(),      // Can manage their profile
+        viewHistory: z.boolean().optional(),        // Can view order/appointment history
+        usePromotions: z.boolean().optional(),      // Can use coupons/promotions
+        makePayments: z.boolean().optional(),       // Can make payments online
+        receiveNotifications: z.boolean().optional(), // Receives notifications
+      }).optional(),
+    }).default({ enabled: false }),
+  }).optional(),
+  
+  // Entities (Tables) - SHARED between surfaces (single source of truth)
   entities: z.array(EntityDefSchema),
   
-  // Pages
+  // Pages - includes both admin and customer pages (distinguished by 'surface' field)
   pages: z.array(PageDefSchema),
   
-  // Workflows
+  // Workflows - SHARED between surfaces
   workflows: z.array(WorkflowDefSchema),
   
-  // Navigation
+  // Admin Navigation (internal/staff)
   navigation: z.object({
     rules: z.array(NavigationRuleSchema),
     defaultPage: z.string(),
-    sidebar: z.object({
-      enabled: z.boolean().default(true),
-      position: z.enum(['left', 'right']).default('left'),
-      collapsible: z.boolean().default(true),
-      items: z.array(z.object({
-        pageId: z.string(),
-        icon: z.string().optional(),
-        label: z.string(),
-        badge: z.string().optional(),
-      })),
-    }).optional(),
+    sidebar: SidebarSchema.optional(),
   }),
+  
+  // Provider Navigation (medical/healthcare apps)
+  providerNavigation: z.object({
+    rules: z.array(NavigationRuleSchema),
+    defaultPage: z.string(),
+    sidebar: SidebarSchema.optional(),
+    // Provider-specific navigation options
+    showProfile: z.boolean().optional(),
+    showSchedule: z.boolean().optional(),
+    showNotifications: z.boolean().optional(),
+  }).optional(),
+  
+  // Patient Navigation (medical/healthcare apps)  
+  patientNavigation: z.object({
+    rules: z.array(NavigationRuleSchema),
+    defaultPage: z.string(),
+    sidebar: SidebarSchema.optional(),
+    // Patient-specific navigation options
+    showProfile: z.boolean().optional(),
+    showAppointments: z.boolean().optional(),
+    showMessages: z.boolean().optional(),
+  }).optional(),
+  
+  // Customer Navigation (separate from admin, uses same entities)
+  customerNavigation: z.object({
+    rules: z.array(NavigationRuleSchema),
+    defaultPage: z.string(),
+    sidebar: SidebarSchema.optional(),
+    // Customer-specific navigation options
+    showCart: z.boolean().optional(),
+    showProfile: z.boolean().optional(),
+    showOrderHistory: z.boolean().optional(),
+  }).optional(),
   
   // Theme
   theme: z.object({
@@ -429,8 +564,43 @@ export const AppBlueprintSchema = z.object({
     secondaryColor: z.string().optional(),
     accentColor: z.string().optional(),
     mode: z.enum(['light', 'dark', 'auto']).default('light'),
+    // Surface Intent - controls ambient background and visual depth (atmosphere)
+    surfaceIntent: z.enum([
+      'warm-artisanal',
+      'neutral-professional',
+      'modern-dark',
+      'playful-light',
+    ]).optional(),
     borderRadius: z.enum(['none', 'small', 'medium', 'large']).default('medium'),
     fontFamily: z.string().optional(),
+    // Extended design system support (matches UnifiedTheme from dna/schema.ts)
+    typography: z.object({
+      fontFamily: z.string().optional(),
+      headingFamily: z.string().optional(),
+      monoFamily: z.string().optional(),
+      scale: z.enum(['compact', 'normal', 'relaxed']).optional(),
+      weight: z.object({
+        normal: z.number().optional(),
+        medium: z.number().optional(),
+        bold: z.number().optional(),
+      }).optional(),
+    }).optional(),
+    spacing: z.object({
+      scale: z.enum(['compact', 'normal', 'relaxed']).optional(),
+      borderRadius: z.enum(['none', 'sm', 'md', 'lg', 'xl', 'full']).optional(),
+      cardPadding: z.enum(['sm', 'md', 'lg']).optional(),
+    }).optional(),
+    shadows: z.object({
+      enabled: z.boolean().optional(),
+      intensity: z.enum(['subtle', 'medium', 'strong']).optional(),
+    }).optional(),
+    animations: z.object({
+      enabled: z.boolean().optional(),
+      duration: z.enum(['fast', 'normal', 'slow']).optional(),
+      easing: z.enum(['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out', 'spring']).optional(),
+    }).optional(),
+    // Custom CSS variables from design system (includes --neo-design-system)
+    customVars: z.record(z.string()).optional(),
   }).optional(),
   
   // Global settings

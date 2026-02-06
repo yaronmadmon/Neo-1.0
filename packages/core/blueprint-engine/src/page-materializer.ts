@@ -12,6 +12,20 @@ import type {
   LayoutConfig,
 } from './types.js';
 
+import {
+  generateDashboardIntent,
+  getIndustrySectionConfig,
+  type DashboardIntent,
+  type DashboardSection,
+  type DomainMetric,
+  type ContextualAction,
+  TIME_SCOPE_LABELS,
+  ACTIONABLE_ROLES,
+} from './dna/index.js';
+
+import { getIndustryKit } from './kits/industries/index.js';
+import type { IndustryKitId } from './kits/industries/types.js';
+
 // ============================================================
 // MATERIALIZED PAGE TYPES
 // ============================================================
@@ -22,6 +36,16 @@ export interface MaterializedComponent {
   props: Record<string, unknown>;
   children?: MaterializedComponent[];
   styles?: Record<string, unknown>;
+  
+  // Dashboard Intent metadata (Phase 18)
+  // Passed to SchemaRenderer for sorting and layout hints
+  intent?: {
+    role?: 'today' | 'in-progress' | 'upcoming' | 'summary' | 'history';
+    priority?: 'primary' | 'secondary' | 'tertiary';
+    timeScope?: 'now' | 'today' | 'this-week' | 'this-month' | 'all-time';
+    layoutHint?: 'stats-row' | 'card-list' | 'data-table' | 'chart' | 'activity' | 'calendar' | 'kanban';
+    emphasis?: 'normal' | 'highlighted';
+  };
 }
 
 export interface MaterializedPage {
@@ -30,6 +54,9 @@ export interface MaterializedPage {
   route: string;
   type: string;
   entityId?: string;
+  
+  // MULTI-SURFACE: Which surface this page belongs to (admin, provider, patient, or customer)
+  surface?: 'admin' | 'provider' | 'customer' | 'patient';
   
   // Layout
   layout: {
@@ -138,10 +165,21 @@ export interface MaterializedApp {
       surface: string;
       text: string;
       textSecondary: string;
+      // Semantic colors
+      success?: string;
+      warning?: string;
+      error?: string;
+      info?: string;
     };
     typography: Record<string, unknown>;
     spacing: Record<string, string>;
     borderRadius: string;
+    // Surface intent - controls ambient background and visual depth (atmosphere)
+    surfaceIntent?: 'warm-artisanal' | 'neutral-professional' | 'modern-dark' | 'playful-light';
+    // Design system information
+    designSystem?: string;
+    // Custom CSS variables from design system
+    customVars?: Record<string, string>;
   };
   
   // Data structure info
@@ -434,6 +472,8 @@ export class PageMaterializer {
       route: page.route,
       type: page.type,
       entityId: page.entity,
+      // DUAL-SURFACE: Preserve surface type from page definition
+      surface: page.surface || 'admin',
       layout: {
         type: page.layout?.type || 'single-column',
         showHeader: page.autoLayout?.showHeader ?? true,
@@ -687,7 +727,8 @@ export class PageMaterializer {
       return {
         type: 'personCard',
         nameField: nameField?.id || 'name',
-        avatarField: imageField?.id,
+        // ENHANCED: Always include common avatar field names - data generator adds them
+        avatarField: imageField?.id || 'avatar',
         subtitleField: subtitleField?.id,
         fieldMappings: [
           emailField ? { field: emailField.id, type: 'email', icon: '✉️' } : null,
@@ -708,7 +749,8 @@ export class PageMaterializer {
       return {
         type: 'itemCard',
         titleField: nameField?.id || 'name',
-        imageField: imageField?.id,
+        // ENHANCED: Always include common image field name - data generator adds them
+        imageField: imageField?.id || 'image',
         subtitleField: subtitleField?.id,
         priceField: priceField?.id,
         statusField: statusField?.id,
@@ -724,10 +766,12 @@ export class PageMaterializer {
       };
     }
 
-    // Default card config
+    // Default card config - still include avatar/image for fallback rendering
     return {
       type: 'card',
       titleField: nameField?.id || 'name',
+      avatarField: imageField?.id || 'avatar',
+      imageField: imageField?.id || 'image',
     };
   }
 
@@ -864,16 +908,22 @@ export class PageMaterializer {
   }
 
   /**
-   * Materialize a dashboard page
-   * ACTION-FIRST DESIGN: Shows actionable widgets, not fake analytics
-   * - "Today's X" - what needs attention now
-   * - "Recent Y" - latest activity  
-   * - "Pending Z" - things waiting for action
-   * - Quick actions to add/manage data
-   * - NO placeholder charts or fake KPIs with 0 values
+   * Materialize a dashboard page using Dashboard Intent System (Phase 18)
+   * 
+   * ENHANCED: Now uses semantic intent for story, hierarchy, and actions
+   * Story flow: Now → Work → Context (today → in-progress → upcoming → summary → history)
+   * 
+   * WHY: This creates dashboards that tell a clear story with domain personality
    */
   private materializeDashboardPage(page: PageDef, entities: EntityDef[]): MaterializedComponent[] {
-    const { industry, features = [], dashboardTemplate } = this.context;
+    const { industry, dashboardTemplate } = this.context;
+    
+    // Generate dashboard intent using the intent system
+    const industryKit = industry?.id ? getIndustryKit(industry.id as IndustryKitId) : undefined;
+    const intent = generateDashboardIntent(entities, industryKit);
+    
+    // Get section config for domain personality
+    const sectionConfig = getIndustrySectionConfig(industry?.id || 'default');
     
     const components: MaterializedComponent[] = [];
     
@@ -886,7 +936,10 @@ export class PageMaterializer {
         {
           id: 'dashboard-title',
           componentId: 'text',
-          props: { text: 'Dashboard', variant: 'h1' },
+          props: { 
+            text: intent.title || sectionConfig.todayTitle || 'Dashboard', 
+            variant: 'h1' 
+          },
         },
         {
           id: 'dashboard-actions',
@@ -898,33 +951,432 @@ export class PageMaterializer {
     };
     components.push(headerContainer);
 
-    // ACTION-FIRST WIDGETS - Show real data, not fake metrics
-    // Build widgets based on kit's dashboard template or entity types
-    const actionWidgets = this.buildActionFirstWidgets(entities, dashboardTemplate, industry?.id);
+    // ================================================================
+    // INTENT-DRIVEN SECTIONS
+    // Sections are generated and ordered by the intent system
+    // Each section has role, priority, and appropriate content
+    // ================================================================
     
-    if (actionWidgets.length > 0) {
-      const widgetsContainer: MaterializedComponent = {
-        id: 'action-widgets',
-        componentId: 'container',
-        props: { className: 'grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mb-6' },
-        children: actionWidgets,
-      };
-      components.push(widgetsContainer);
+    for (const section of intent.sections) {
+      const sectionComponent = this.materializeDashboardSection(section, entities);
+      if (sectionComponent) {
+        components.push(sectionComponent);
+      }
     }
 
-    // Recent items section - Always useful, shows actual data
-    const recentWidgets = this.buildRecentWidgets(entities, dashboardTemplate);
-    if (recentWidgets.length > 0) {
-      const recentContainer: MaterializedComponent = {
-        id: 'recent-container',
-        componentId: 'container',
-        props: { className: 'grid grid-cols-1 lg:grid-cols-2 gap-6' },
-        children: recentWidgets,
+    // ================================================================
+    // ACTIVITY FEED - Always added for real-time feel
+    // WHY: Makes dashboard feel "alive" with real-time activity updates
+    // ================================================================
+    if (entities.length > 0) {
+      const activityFeed: MaterializedComponent = {
+        id: 'activity-feed',
+        componentId: 'activityFeed',
+        props: {
+          title: 'Recent Activity',
+          sources: entities.slice(0, 3).map(e => e.id),
+          limit: 5,
+        },
+        intent: {
+          role: 'history',
+          priority: 'tertiary',
+          layoutHint: 'activity',
+        },
       };
-      components.push(recentContainer);
+      components.push(activityFeed);
     }
 
     return components;
+  }
+  
+  /**
+   * Materialize a single dashboard section based on intent
+   */
+  private materializeDashboardSection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent | null {
+    const { industry } = this.context;
+    
+    // Map section role to appropriate component structure
+    switch (section.role) {
+      case 'today':
+        return this.materializeTodaySection(section, entities);
+      
+      case 'in-progress':
+        return this.materializeInProgressSection(section, entities);
+      
+      case 'upcoming':
+        return this.materializeUpcomingSection(section, entities);
+      
+      case 'summary':
+        return this.materializeSummarySection(section, entities);
+      
+      case 'history':
+        return this.materializeHistorySection(section, entities);
+      
+      default:
+        return null;
+    }
+  }
+  
+  /**
+   * Materialize a "today" section - KPI stats and current state
+   */
+  private materializeTodaySection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent {
+    const statsCards: MaterializedComponent[] = [];
+    
+    if (section.metrics && section.metrics.length > 0) {
+      // Build stats cards from intent metrics
+      section.metrics.forEach((metric, index) => {
+        statsCards.push({
+          id: `kpi-${section.id}-${index}`,
+          componentId: 'statsCard',
+          props: {
+            title: metric.label,
+            metric: metric.sourceMetric,
+            timeScope: metric.timeScope,
+            timeScopeLabel: TIME_SCOPE_LABELS[metric.timeScope],
+            icon: metric.icon,
+            format: metric.format || 'number',
+            emphasize: metric.emphasize,
+          },
+          intent: {
+            role: section.role,
+            priority: section.priority,
+            timeScope: metric.timeScope,
+            emphasis: metric.emphasize ? 'highlighted' : 'normal',
+          },
+        });
+      });
+    } else {
+      // Fallback to entity-based KPIs
+      const kpiWidgets = this.buildKPIWidgets(entities);
+      statsCards.push(...kpiWidgets.map(w => ({
+        ...w,
+        intent: {
+          role: section.role as 'today',
+          priority: section.priority,
+          timeScope: 'today' as const,
+        },
+      })));
+    }
+    
+    return {
+      id: `section-${section.id}`,
+      componentId: 'container',
+      props: { 
+        className: 'mb-6',
+        'data-section-role': section.role,
+        'data-section-priority': section.priority,
+      },
+      children: [
+        // Section title (if different from dashboard title)
+        ...(section.title !== 'Today at a Glance' ? [{
+          id: `${section.id}-title`,
+          componentId: 'text',
+          props: { text: section.title, variant: 'h2', className: 'mb-4' },
+        }] : []),
+        // Stats grid
+        {
+          id: `${section.id}-grid`,
+          componentId: 'statsCardGrid',
+          props: { 
+            columns: Math.min(statsCards.length, 4),
+          },
+          children: statsCards,
+        },
+      ],
+      intent: {
+        role: section.role,
+        priority: section.priority,
+        timeScope: section.timeScope,
+        layoutHint: section.layoutHint || 'stats-row',
+      },
+    };
+  }
+  
+  /**
+   * Materialize an "in-progress" section - active work needing attention
+   */
+  private materializeInProgressSection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent {
+    const entity = entities.find(e => e.id === section.listEntity) || entities[0];
+    
+    // Build action buttons if section allows actions
+    const actionButtons: MaterializedComponent[] = [];
+    if (section.actions && ACTIONABLE_ROLES.includes(section.role)) {
+      section.actions.forEach((action, index) => {
+        actionButtons.push({
+          id: `${section.id}-action-${index}`,
+          componentId: 'button',
+          props: {
+            label: action.label,
+            variant: action.variant || 'secondary',
+            icon: action.icon,
+            'data-action-id': action.actionId,
+            'data-entity': action.entity,
+            'data-visibility-rule': action.visibilityRule,
+          },
+        });
+      });
+    }
+    
+    return {
+      id: `section-${section.id}`,
+      componentId: 'card',
+      props: { 
+        title: section.title,
+        subtitle: section.subtitle,
+        className: 'mb-6',
+        'data-section-role': section.role,
+        'data-section-priority': section.priority,
+      },
+      children: [
+        // Header with title and actions
+        ...(actionButtons.length > 0 ? [{
+          id: `${section.id}-header`,
+          componentId: 'container',
+          props: { className: 'flex justify-between items-center mb-4' },
+          children: [
+            {
+              id: `${section.id}-title`,
+              componentId: 'text',
+              props: { text: section.title, variant: 'h3' },
+            },
+            {
+              id: `${section.id}-actions`,
+              componentId: 'container',
+              props: { className: 'flex gap-2' },
+              children: actionButtons,
+            },
+          ],
+        }] : [{
+          id: `${section.id}-title`,
+          componentId: 'text',
+          props: { text: section.title, variant: 'h3', className: 'mb-4' },
+        }]),
+        // Entity list
+        {
+          id: `${section.id}-list`,
+          componentId: 'list',
+          props: {
+            source: entity?.id || section.listEntity,
+            filter: section.listFilter,
+            limit: section.limit || 5,
+            variant: 'compact',
+            showStatus: true,
+          },
+        },
+      ],
+      intent: {
+        role: section.role,
+        priority: section.priority,
+        layoutHint: section.layoutHint || 'card-list',
+      },
+    };
+  }
+  
+  /**
+   * Materialize an "upcoming" section - scheduled future items
+   */
+  private materializeUpcomingSection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent {
+    const entity = entities.find(e => e.id === section.listEntity) || entities[0];
+    
+    // Build action buttons if section allows actions
+    const actionButtons: MaterializedComponent[] = [];
+    if (section.actions && ACTIONABLE_ROLES.includes(section.role)) {
+      section.actions.forEach((action, index) => {
+        actionButtons.push({
+          id: `${section.id}-action-${index}`,
+          componentId: 'button',
+          props: {
+            label: action.label,
+            variant: action.variant || 'secondary',
+            icon: action.icon,
+          },
+        });
+      });
+    }
+    
+    // Use calendar layout hint if suggested
+    const useCalendar = section.layoutHint === 'calendar';
+    
+    return {
+      id: `section-${section.id}`,
+      componentId: 'card',
+      props: { 
+        title: section.title,
+        subtitle: section.timeScope ? TIME_SCOPE_LABELS[section.timeScope] : undefined,
+        className: 'mb-6',
+        'data-section-role': section.role,
+        'data-section-priority': section.priority,
+      },
+      children: [
+        // Header
+        {
+          id: `${section.id}-header`,
+          componentId: 'container',
+          props: { className: 'flex justify-between items-center mb-4' },
+          children: [
+            {
+              id: `${section.id}-title`,
+              componentId: 'text',
+              props: { text: section.title, variant: 'h3' },
+            },
+            ...(actionButtons.length > 0 ? [{
+              id: `${section.id}-actions`,
+              componentId: 'container',
+              props: { className: 'flex gap-2' },
+              children: actionButtons,
+            }] : []),
+          ],
+        },
+        // Content - calendar or list
+        useCalendar ? {
+          id: `${section.id}-calendar`,
+          componentId: 'calendar',
+          props: {
+            source: entity?.id || section.listEntity,
+            view: 'week',
+            compact: true,
+          },
+        } : {
+          id: `${section.id}-list`,
+          componentId: 'list',
+          props: {
+            source: entity?.id || section.listEntity,
+            filter: section.listFilter,
+            limit: section.limit || 5,
+            variant: 'timeline',
+            showDate: true,
+          },
+        },
+      ],
+      intent: {
+        role: section.role,
+        priority: section.priority,
+        timeScope: section.timeScope,
+        layoutHint: section.layoutHint || 'card-list',
+      },
+    };
+  }
+  
+  /**
+   * Materialize a "summary" section - aggregate metrics, no actions
+   */
+  private materializeSummarySection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent {
+    const statsCards: MaterializedComponent[] = [];
+    
+    if (section.metrics && section.metrics.length > 0) {
+      section.metrics.forEach((metric, index) => {
+        statsCards.push({
+          id: `summary-${section.id}-${index}`,
+          componentId: 'statsCard',
+          props: {
+            title: metric.label,
+            metric: metric.sourceMetric,
+            timeScope: metric.timeScope,
+            timeScopeLabel: TIME_SCOPE_LABELS[metric.timeScope],
+            icon: metric.icon,
+            format: metric.format || 'number',
+            variant: 'compact', // Summary cards are more compact
+          },
+          intent: {
+            role: section.role,
+            priority: section.priority,
+            timeScope: metric.timeScope,
+          },
+        });
+      });
+    }
+    
+    return {
+      id: `section-${section.id}`,
+      componentId: 'container',
+      props: { 
+        className: 'mb-6',
+        'data-section-role': section.role,
+        'data-section-priority': section.priority,
+      },
+      children: [
+        {
+          id: `${section.id}-title`,
+          componentId: 'text',
+          props: { text: section.title, variant: 'h3', className: 'mb-4 text-muted-foreground' },
+        },
+        {
+          id: `${section.id}-grid`,
+          componentId: 'statsCardGrid',
+          props: { 
+            columns: Math.min(statsCards.length, 4),
+            variant: 'compact',
+          },
+          children: statsCards,
+        },
+      ],
+      intent: {
+        role: section.role,
+        priority: section.priority,
+        timeScope: section.timeScope,
+        layoutHint: section.layoutHint || 'stats-row',
+      },
+    };
+  }
+  
+  /**
+   * Materialize a "history" section - past records, no actions
+   */
+  private materializeHistorySection(
+    section: DashboardSection, 
+    entities: EntityDef[]
+  ): MaterializedComponent {
+    const entity = entities.find(e => e.id === section.listEntity) || entities[0];
+    
+    return {
+      id: `section-${section.id}`,
+      componentId: 'card',
+      props: { 
+        title: section.title,
+        className: 'mb-6',
+        'data-section-role': section.role,
+        'data-section-priority': section.priority,
+      },
+      children: [
+        {
+          id: `${section.id}-title`,
+          componentId: 'text',
+          props: { text: section.title, variant: 'h3', className: 'mb-4' },
+        },
+        {
+          id: `${section.id}-table`,
+          componentId: 'dataTable',
+          props: {
+            source: entity?.id || section.listEntity,
+            limit: section.limit || 10,
+            compact: true,
+            pagination: true,
+          },
+        },
+      ],
+      intent: {
+        role: section.role,
+        priority: section.priority,
+        timeScope: section.timeScope,
+        layoutHint: section.layoutHint || 'data-table',
+      },
+    };
   }
   
   /**
@@ -1166,6 +1618,120 @@ export class PageMaterializer {
     }
     
     return widgets;
+  }
+
+  /**
+   * Build KPI stats cards for dashboard
+   * Creates statsCard components from entities with numeric/currency fields
+   * WHY: statsCard provides rich KPI display with trends, icons, and formatting
+   */
+  private buildKPIWidgets(entities: EntityDef[]): MaterializedComponent[] {
+    const kpis: MaterializedComponent[] = [];
+    
+    for (const entity of entities) {
+      // Find currency fields that make good KPIs (e.g., "Total Revenue")
+      const currencyField = entity.fields?.find(f => f.type === 'currency');
+      
+      if (currencyField) {
+        kpis.push({
+          id: `kpi-${entity.id}-${currencyField.id}`,
+          componentId: 'statsCard',  // Rich component, not generic card
+          props: {
+            title: `Total ${currencyField.name}`,
+            value: '$0',  // Will be hydrated with aggregated data
+            icon: 'currency',
+            source: entity.id,
+            field: currencyField.id,
+            aggregation: 'sum',
+            format: 'currency',
+          },
+        });
+      }
+      
+      // Add count KPI for primary entities (e.g., "Total Clients")
+      if (kpis.length < 4) {
+        const icon = this.getEntityIcon(entity);
+        kpis.push({
+          id: `kpi-${entity.id}-count`,
+          componentId: 'statsCard',
+          props: {
+            title: `Total ${entity.pluralName}`,
+            value: '0',
+            icon,
+            source: entity.id,
+            aggregation: 'count',
+          },
+        });
+      }
+    }
+    
+    // Limit to 4 KPIs for clean layout
+    return kpis.slice(0, 4);
+  }
+
+  /**
+   * Build chart widget for dashboard
+   * Creates areaChart from entity with date + numeric fields (trend data)
+   * WHY: Charts show trends over time, making dashboards feel "alive"
+   */
+  private buildChartWidget(entities: EntityDef[]): MaterializedComponent | null {
+    // Find entity with date + numeric field (good for time-series)
+    const chartEntity = entities.find(e => 
+      e.fields?.some(f => f.type === 'date' || f.type === 'datetime') &&
+      e.fields?.some(f => f.type === 'currency' || f.type === 'number')
+    );
+    
+    if (!chartEntity) return null;
+    
+    const dateField = chartEntity.fields?.find(f => f.type === 'date' || f.type === 'datetime');
+    const valueField = chartEntity.fields?.find(f => f.type === 'currency' || f.type === 'number');
+    
+    if (!dateField || !valueField) return null;
+    
+    return {
+      id: `chart-${chartEntity.id}`,
+      componentId: 'areaChart',  // Rich chart component
+      props: {
+        title: `${chartEntity.pluralName} Over Time`,
+        description: `Trend of ${valueField.name.toLowerCase()} by ${dateField.name.toLowerCase()}`,
+        source: chartEntity.id,
+        xAxisKey: dateField.id,
+        dataKeys: [valueField.id],
+        dataLabels: {
+          [valueField.id]: valueField.name,
+        },
+      },
+    };
+  }
+
+  /**
+   * Get icon string for an entity based on its type
+   */
+  private getEntityIcon(entity: EntityDef): string {
+    const nameLower = entity.name.toLowerCase();
+    
+    // Person types
+    if (['member', 'client', 'customer', 'patient', 'user', 'employee', 'staff', 'student', 'tenant', 'guest'].some(k => nameLower.includes(k))) {
+      return 'users';
+    }
+    // Financial
+    if (['invoice', 'payment', 'order', 'revenue', 'expense', 'bill'].some(k => nameLower.includes(k))) {
+      return 'currency';
+    }
+    // Scheduling
+    if (['appointment', 'booking', 'reservation', 'class', 'session', 'job'].some(k => nameLower.includes(k))) {
+      return 'calendar';
+    }
+    // Products/Inventory
+    if (['product', 'item', 'inventory', 'material', 'equipment'].some(k => nameLower.includes(k))) {
+      return 'package';
+    }
+    // Tasks/Projects
+    if (['task', 'project', 'ticket', 'issue'].some(k => nameLower.includes(k))) {
+      return 'clipboard';
+    }
+    
+    return 'activity';  // Default icon
   }
 
   /**
@@ -1458,7 +2024,7 @@ export class PageMaterializer {
       'calendar': 'calendar',
       'kanban': 'kanban',
       'chat': 'chat',
-      'stat-card': 'card',
+      'stat-card': 'statsCard',  // FIXED: Map to rich statsCard component
       'field-display': 'text',
       'checkbox': 'input',
       'select': 'input',
@@ -1562,6 +2128,8 @@ export class PageMaterializer {
       return {
         type: 'personCard',
         nameField: 'name',
+        // ENHANCED: Always include avatar field - data generator adds them
+        avatarField: 'avatar',
         subtitleField: 'email',
         fieldMappings: [
           { field: 'email', type: 'email', icon: '✉️' },
@@ -1579,8 +2147,11 @@ export class PageMaterializer {
       return {
         type: 'itemCard',
         titleField: 'name',
+        // ENHANCED: Always include image field - data generator adds them
+        imageField: 'image',
         subtitleField: 'type',
         statusField: 'status',
+        priceField: 'price',
         fieldMappings: [
           { field: 'date', label: 'Date' },
           { field: 'amount', label: 'Amount' },
@@ -1592,10 +2163,12 @@ export class PageMaterializer {
       };
     }
     
-    // Default card config
+    // Default card config - still include avatar/image for fallback rendering
     return {
       type: 'card',
       titleField: 'name',
+      avatarField: 'avatar',
+      imageField: 'image',
     };
   }
 
@@ -1714,25 +2287,56 @@ export class PageMaterializer {
 
   /**
    * Materialize theme
+   * 
+   * IMPORTANT: The ThemeBuilder returns theme.colors.primary, not theme.primaryColor
+   * So we need to check both locations for compatibility.
    */
   private materializeTheme(blueprint: AppBlueprint): MaterializedApp['theme'] {
-    const primary = blueprint.theme?.primaryColor || '#8b5cf6';
-    const secondary = blueprint.theme?.secondaryColor || '#6d28d9';
-    const accent = blueprint.theme?.accentColor || '#a78bfa';
+    const customVars = blueprint.theme?.customVars;
+    
+    // Check both new format (theme.colors.primary) and legacy format (theme.primaryColor)
+    const themeColors = (blueprint.theme as any)?.colors;
+    const primary = themeColors?.primary || blueprint.theme?.primaryColor || customVars?.['--neo-primary'] || '#8b5cf6';
+    const secondary = themeColors?.secondary || blueprint.theme?.secondaryColor || customVars?.['--neo-secondary'] || '#6d28d9';
+    const accent = themeColors?.accent || blueprint.theme?.accentColor || customVars?.['--neo-accent'] || '#a78bfa';
     const isDark = blueprint.theme?.mode === 'dark';
+    
+    // Extract design system identifier from customVars or directly from theme
+    const designSystem = customVars?.['--neo-design-system'] || (blueprint.theme as any)?.designSystem;
+
+    // Get typography from theme if available
+    const themeTypography = (blueprint.theme as any)?.typography;
+    const fontFamily = themeTypography?.fontFamily || blueprint.theme?.fontFamily || customVars?.['--neo-font-sans'] || 'system-ui, -apple-system, sans-serif';
+    const headingFamily = themeTypography?.headingFamily || customVars?.['--neo-font-heading'];
+    
+    // Get spacing scale from theme if available
+    const themeSpacing = (blueprint.theme as any)?.spacing;
+    const spacingScale = themeSpacing?.scale; // 'compact', 'normal', or 'relaxed'
+    
+    // Background and surface colors with design system support
+    const background = themeColors?.background || (isDark ? '#1a1a2e' : '#ffffff');
+    const surface = themeColors?.surface || (isDark ? '#16213e' : '#f8fafc');
+    const text = themeColors?.text || (isDark ? '#ffffff' : '#1e293b');
+    const textMuted = themeColors?.textMuted || themeColors?.textSecondary || (isDark ? '#94a3b8' : '#64748b');
 
     return {
       colors: {
         primary,
         secondary,
         accent,
-        background: isDark ? '#1a1a2e' : '#ffffff',
-        surface: isDark ? '#16213e' : '#f8fafc',
-        text: isDark ? '#ffffff' : '#1e293b',
-        textSecondary: isDark ? '#94a3b8' : '#64748b',
+        background,
+        surface,
+        text,
+        textSecondary: textMuted,
+        // Semantic colors from design system
+        success: themeColors?.success || customVars?.['--neo-success'],
+        warning: themeColors?.warning || customVars?.['--neo-warning'],
+        error: themeColors?.error || customVars?.['--neo-error'],
+        info: themeColors?.info || customVars?.['--neo-info'],
       },
       typography: {
-        fontFamily: blueprint.theme?.fontFamily || 'system-ui, -apple-system, sans-serif',
+        fontFamily,
+        headingFamily,
         fontSize: {
           xs: '0.75rem',
           sm: '0.875rem',
@@ -1750,8 +2354,16 @@ export class PageMaterializer {
         lg: '1.5rem',
         xl: '2rem',
         '2xl': '3rem',
+        // Include scale information for density-aware components
+        scale: spacingScale,
       },
-      borderRadius: this.getBorderRadius(blueprint.theme?.borderRadius),
+      borderRadius: this.getBorderRadius(themeSpacing?.borderRadius || blueprint.theme?.borderRadius),
+      // Surface intent - controls ambient background and visual depth (atmosphere)
+      surfaceIntent: blueprint.theme?.surfaceIntent,
+      // Design system information
+      designSystem,
+      // Pass through all custom CSS variables
+      customVars,
     };
   }
 

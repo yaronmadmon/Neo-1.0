@@ -145,6 +145,8 @@ function materializedAppToSchema(app: MaterializedApp): App['schema'] {
       route: page.route,
       layout: page.layout,
       components: page.components,
+      // DUAL-SURFACE: Include surface type for routing/navigation
+      surface: (page as any).surface || 'admin',
     })),
     components: [],
     dataModels: app.dataModels.map((model: MaterializedApp['dataModels'][number]) => ({
@@ -246,12 +248,19 @@ function materializedAppToSchema(app: MaterializedApp): App['schema'] {
 }
 
 function materializedAppToTheme(app: MaterializedApp): App['theme'] {
+  // Cast to allow design system fields which are added to contracts but may not be compiled yet
   return {
     colors: app.theme.colors,
     typography: app.theme.typography,
     spacing: app.theme.spacing,
     borderRadius: { base: app.theme.borderRadius },
-  };
+    // Surface intent - controls ambient background and visual depth (atmosphere)
+    surfaceIntent: app.theme.surfaceIntent,
+    // Design system information
+    designSystem: app.theme.designSystem,
+    // Custom CSS variables from design system (includes --neo-design-system, --neo-primary, etc.)
+    customVars: app.theme.customVars,
+  } as App['theme'];
 }
 
 // Global error handler to ensure all errors return valid JSON
@@ -583,6 +592,13 @@ server.post<{
 
       const now = new Date();
       const resolvedCategory = category || AppCategory.PERSONAL;
+      // Build schema with dual-surface support
+      const schemaWithSurfaces = {
+        ...materializedAppToSchema(generated.materializedApp),
+        // DUAL-SURFACE: Include surfaces config and customer navigation from blueprint
+        surfaces: generated.blueprint.surfaces,
+        customerNavigation: generated.blueprint.customerNavigation,
+      };
       const app: App = {
         id: generated.blueprint.id,
         name: generated.blueprint.name,
@@ -593,7 +609,7 @@ server.post<{
         createdAt: now,
         updatedAt: now,
         createdBy: preferences?.userId || randomUUID(),
-        schema: materializedAppToSchema(generated.materializedApp),
+        schema: schemaWithSurfaces,
         theme: materializedAppToTheme(generated.materializedApp),
         data: generated.sampleData,
         settings: {
@@ -1581,6 +1597,7 @@ const start = async () => {
       mandatoryDiscoveryHandler,
       smartDiscoveryHandler,
       aiDiscoveryHandler, // AI-powered discovery with dynamic questions
+      aiProviderForDiscovery, // Pass AI provider for conversational discovery
       appGenerator,
       neoEngine,
       safetyOrchestrator,

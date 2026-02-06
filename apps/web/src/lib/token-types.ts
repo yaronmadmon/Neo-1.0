@@ -35,6 +35,12 @@ export type TokenName =
   | '--chart-5'
   // Layout
   | '--radius'
+  // Surface layers (atmosphere)
+  | '--surface-app'
+  | '--surface-section'
+  | '--surface-card'
+  | '--surface-app-foreground'
+  | '--surface-divider'
   // Sidebar
   | '--sidebar-background'
   | '--sidebar-foreground'
@@ -104,12 +110,34 @@ export interface ThemeSpacing {
 }
 
 /**
+ * Theme typography structure
+ */
+export interface ThemeTypography {
+  fontFamily?: string;
+  headingFamily?: string;
+  monoFamily?: string;
+  fontSize?: 'xs' | 'sm' | 'base' | 'lg' | 'xl';
+  lineHeight?: 'tight' | 'normal' | 'relaxed';
+}
+
+/**
+ * Surface intent for atmosphere control
+ */
+export type SurfaceIntent =
+  | 'warm-artisanal'
+  | 'neutral-professional'
+  | 'modern-dark'
+  | 'playful-light';
+
+/**
  * Theme tokens that can be applied to CSS variables
  */
 export interface ThemeTokens {
   colors?: ThemeColors;
+  typography?: ThemeTypography;
   spacing?: ThemeSpacing;
   mode?: 'light' | 'dark' | 'auto';
+  surfaceIntent?: SurfaceIntent;
   customVars?: Record<string, string>;
 }
 

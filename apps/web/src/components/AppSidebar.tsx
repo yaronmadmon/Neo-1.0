@@ -28,6 +28,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import {
   DropdownMenu,
@@ -47,6 +48,7 @@ interface Page {
 
 interface AppSidebarProps {
   appName: string
+  logo?: string // URL to logo image
   pages: Page[]
   currentPageId: string | null
   onPageSelect: (pageId: string) => void
@@ -74,12 +76,24 @@ function getPageIcon(type: string | undefined) {
 
 export function AppSidebar({
   appName,
+  logo,
   pages,
   currentPageId,
   onPageSelect,
   onNavigateHome,
   showUserMenu = true,
 }: AppSidebarProps) {
+  const { setOpenMobile, isMobile } = useSidebar()
+  
+  // Handle page selection - close sidebar on mobile
+  const handlePageSelect = (pageId: string) => {
+    onPageSelect(pageId)
+    // Close sidebar on mobile after selecting a page
+    if (isMobile) {
+      setOpenMobile(false)
+    }
+  }
+  
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -89,11 +103,19 @@ export function AppSidebar({
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                <span className="text-sm font-semibold">
-                  {appName.charAt(0).toUpperCase()}
-                </span>
-              </div>
+              {logo ? (
+                <img 
+                  src={logo} 
+                  alt={`${appName} logo`}
+                  className="size-8 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                  <span className="text-sm font-semibold">
+                    {appName.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{appName}</span>
                 <span className="truncate text-xs text-muted-foreground">Preview</span>
@@ -115,7 +137,7 @@ export function AppSidebar({
                   <SidebarMenuItem key={page.id}>
                     <SidebarMenuButton
                       isActive={isActive}
-                      onClick={() => onPageSelect(page.id)}
+                      onClick={() => handlePageSelect(page.id)}
                       tooltip={page.name}
                     >
                       <Icon className="size-4" />

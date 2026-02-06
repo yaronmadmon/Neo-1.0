@@ -202,11 +202,16 @@ export const ThemeConfigSchema = z.object({
     error: z.string().optional(),
     success: z.string().optional(),
     warning: z.string().optional(),
+    info: z.string().optional(),
   }),
   typography: z.record(z.unknown()),
   spacing: z.record(z.unknown()),
   borderRadius: z.record(z.unknown()).optional(),
   shadows: z.record(z.unknown()).optional(),
+  // Design system information
+  designSystem: z.string().optional(),
+  // Custom CSS variables from design system (includes --neo-design-system, --neo-primary, etc.)
+  customVars: z.record(z.string()).optional(),
 });
 
 export const AppSchema = z.object({

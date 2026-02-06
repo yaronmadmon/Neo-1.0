@@ -4,6 +4,8 @@
  */
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { SchemaRenderer } from './components/SchemaRenderer.js';
+import { SettingsPage } from './components/SettingsPage.js';
+import { ScheduleCalendar } from './components/ScheduleCalendar.js';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from './components/ui/sidebar.js';
 import { AppSidebar } from './components/AppSidebar.js';
 import { Separator } from './components/ui/separator.js';
@@ -53,6 +55,14 @@ export default function Preview({ id: propId }: PreviewProps) {
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
   const [showSetupSummary, setShowSetupSummary] = useState(false);
+  
+  // Surface state - determines which view/role the user sees
+  // 'admin' = Platform admin view
+  // 'staff' = Location staff/operator view  
+  // 'customer' = End customer view
+  // 'provider' = Provider view (medical)
+  // 'patient' = Patient view (medical)
+  const [currentSurface, setCurrentSurface] = useState<'admin' | 'staff' | 'customer' | 'provider' | 'patient'>('admin');
 
   // Extract app configuration from schema if available
   const appConfiguration = useMemo<Partial<AppConfiguration> | undefined>(() => {
@@ -404,13 +414,36 @@ export default function Preview({ id: propId }: PreviewProps) {
       console.log('🔄 Fallback: Add button → looking for form page:', formPageId, 'entity:', entityId);
       
       // Check if form page exists - try multiple patterns
-      const formPage = app?.schema?.pages?.find((p: any) => 
-        p.id === formPageId || 
-        p.id === `${entityId}s-form` ||
-        p.id === `add-${entityId}` ||
-        (p.type === 'form' && p.entity === entityId) ||
-        (p.type === 'form' && p.id.includes(entityId))
-      ) || app?.schema?.pages?.find((p: any) => p.type === 'form');  // Final fallback to any form page
+      const entityLower = entityId.toLowerCase();
+      const entityPlural = entityLower.endsWith('s') ? entityLower : `${entityLower}s`;
+      const entitySingular = entityLower.endsWith('s') ? entityLower.slice(0, -1) : entityLower;
+      
+      const formPage = app?.schema?.pages?.find((p: any) => {
+        const pageIdLower = (p.id || '').toLowerCase();
+        const pageNameLower = (p.name || '').toLowerCase();
+        
+        // Match by ID patterns
+        if (pageIdLower === `${entityLower}-form`) return true;
+        if (pageIdLower === `${entityPlural}-form`) return true;
+        if (pageIdLower === `${entitySingular}-form`) return true;
+        if (pageIdLower === `add-${entityLower}`) return true;
+        if (pageIdLower === `add-${entitySingular}`) return true;
+        if (pageIdLower === `add-${entityPlural}`) return true;
+        if (pageIdLower.includes(entityLower) && p.type === 'form') return true;
+        
+        // Match by name patterns (e.g., "Add Order", "New Customer")
+        if (pageNameLower === `add ${entityLower}`) return true;
+        if (pageNameLower === `add ${entitySingular}`) return true;
+        if (pageNameLower === `new ${entityLower}`) return true;
+        if (pageNameLower.includes('add') && pageNameLower.includes(entitySingular)) return true;
+        
+        // Match by entity property
+        if (p.entity?.toLowerCase() === entityLower || p.entity?.toLowerCase() === entitySingular) {
+          if (p.type === 'form') return true;
+        }
+        
+        return false;
+      }) || app?.schema?.pages?.find((p: any) => p.type === 'form');  // Final fallback to any form page
       
       if (formPage) {
         console.log('🔄 Found form page:', formPage.id);
@@ -429,29 +462,61 @@ export default function Preview({ id: propId }: PreviewProps) {
     
     // Handle "Edit" buttons - navigate to form page in edit mode
     if (componentIdLower.includes('-edit-btn') || componentIdLower.includes('edit-')) {
-      const entityId = componentId.replace(/-edit-btn$/i, '').replace(/^edit-/i, '');
+      const entityId = componentId.replace(/-edit-btn$/i, '').replace(/^edit-/i, '').replace(/-btn$/i, '');
+      const entityLower = entityId.toLowerCase();
+      const entitySingular = entityLower.endsWith('s') ? entityLower.slice(0, -1) : entityLower;
       console.log('🔄 Fallback: Edit button for:', entityId);
-      setNotification({ message: `Edit ${entityId}`, type: 'success' });
+      
+      // Try to find the form page for editing
+      const editPage = app?.schema?.pages?.find((p: any) => {
+        const pageIdLower = (p.id || '').toLowerCase();
+        const pageNameLower = (p.name || '').toLowerCase();
+        if (p.type === 'form' && pageIdLower.includes(entitySingular)) return true;
+        if (pageNameLower.includes('edit') && pageNameLower.includes(entitySingular)) return true;
+        return false;
+      }) || app?.schema?.pages?.find((p: any) => p.type === 'form');
+      
+      if (editPage) {
+        setCurrentPageId(editPage.id);
+        setNotification({ message: `Editing ${entityId}...`, type: 'success' });
+      } else {
+        setNotification({ message: `Edit ${entityId}`, type: 'success' });
+      }
       setTimeout(() => setNotification(null), 2000);
       return;
     }
     
     // Handle "View" buttons - navigate to detail page
     if (componentIdLower.includes('-view-btn') || componentIdLower.includes('view-')) {
-      const entityId = componentId.replace(/-view-btn$/i, '').replace(/^view-/i, '');
-      const detailPageId = `${entityId}-detail`;
-      console.log('🔄 Fallback: View button → navigating to detail:', detailPageId);
+      const entityId = componentId.replace(/-view-btn$/i, '').replace(/^view-/i, '').replace(/-btn$/i, '');
+      const entityLower = entityId.toLowerCase();
+      const entitySingular = entityLower.endsWith('s') ? entityLower.slice(0, -1) : entityLower;
+      const entityPlural = entityLower.endsWith('s') ? entityLower : `${entityLower}s`;
+      console.log('🔄 Fallback: View button → navigating to detail for:', entityId);
       
-      const detailPage = app?.schema?.pages?.find((p: any) => 
-        p.id === detailPageId || p.type === 'detail' && p.id.includes(entityId)
-      );
+      const detailPage = app?.schema?.pages?.find((p: any) => {
+        const pageIdLower = (p.id || '').toLowerCase();
+        const pageNameLower = (p.name || '').toLowerCase();
+        
+        // Match detail pages
+        if (pageIdLower === `${entityLower}-detail`) return true;
+        if (pageIdLower === `${entitySingular}-detail`) return true;
+        if (pageIdLower === `${entityPlural}-detail`) return true;
+        if (pageIdLower === `${entityLower}-details`) return true;
+        if (pageIdLower === `${entitySingular}-details`) return true;
+        if (p.type === 'detail' && pageIdLower.includes(entitySingular)) return true;
+        if (pageNameLower.includes('detail') && pageNameLower.includes(entitySingular)) return true;
+        
+        return false;
+      });
       
       if (detailPage) {
         setCurrentPageId(detailPage.id);
+        setNotification({ message: `Viewing ${entityId} details...`, type: 'success' });
       } else {
-        setNotification({ message: `View ${entityId} details`, type: 'success' });
-        setTimeout(() => setNotification(null), 2000);
+        setNotification({ message: `View ${entityId} details (page not found)`, type: 'success' });
       }
+      setTimeout(() => setNotification(null), 2000);
       return;
     }
     
@@ -585,10 +650,57 @@ export default function Preview({ id: propId }: PreviewProps) {
     fetchApp();
   }, [id]);
 
-  // Derive pages and search query early so they can be used in hooks
-  const pages = useMemo(() => {
+  // Detect available surfaces from the app schema
+  const availableSurfaces = useMemo(() => {
+    if (!app?.schema) return ['admin'];
+    
+    const schema = app.schema as any;
+    const surfaces: Array<'admin' | 'staff' | 'customer' | 'provider' | 'patient'> = ['admin'];
+    
+    // Check surfaces config
+    if (schema.surfaces?.staff?.enabled) surfaces.push('staff');
+    if (schema.surfaces?.customer?.enabled) surfaces.push('customer');
+    if (schema.surfaces?.provider?.enabled) surfaces.push('provider');
+    if (schema.surfaces?.patient?.enabled) surfaces.push('patient');
+    
+    // Also check if pages exist for each surface (even without explicit config)
+    const pagesList = Array.isArray(schema.pages) ? schema.pages : [];
+    if (!surfaces.includes('staff') && pagesList.some((p: any) => p.surface === 'staff')) {
+      surfaces.push('staff');
+    }
+    if (!surfaces.includes('customer') && pagesList.some((p: any) => p.surface === 'customer')) {
+      surfaces.push('customer');
+    }
+    if (!surfaces.includes('provider') && pagesList.some((p: any) => p.surface === 'provider')) {
+      surfaces.push('provider');
+    }
+    if (!surfaces.includes('patient') && pagesList.some((p: any) => p.surface === 'patient')) {
+      surfaces.push('patient');
+    }
+    
+    return surfaces;
+  }, [app?.schema]);
+
+  // Derive pages filtered by current surface (for search/global use)
+  const allPages = useMemo(() => {
     return Array.isArray(app?.schema?.pages) ? app.schema.pages : [];
   }, [app?.schema?.pages]);
+
+  // Filter pages by current surface
+  const pages = useMemo(() => {
+    const pagesList = Array.isArray(app?.schema?.pages) ? app.schema.pages : [];
+    
+    // Filter pages by surface - admin sees pages without surface or with surface='admin'
+    // Other surfaces see only their own pages
+    return pagesList.filter((page: any) => {
+      if (currentSurface === 'admin') {
+        // Admin sees all pages without explicit surface, or explicitly admin pages
+        return !page.surface || page.surface === 'admin';
+      }
+      // Other surfaces only see pages explicitly marked for them
+      return page.surface === currentSurface;
+    });
+  }, [app?.schema?.pages, currentSurface]);
   
   const normalizedQuery = globalSearch.trim().toLowerCase();
 
@@ -660,10 +772,15 @@ export default function Preview({ id: propId }: PreviewProps) {
   }, [app?.data, filterDataByQuery]);
 
   useEffect(() => {
-    if (app?.schema?.pages?.length) {
-      setCurrentPageId(app.schema.pages[0].id);
+    // Set initial page based on current surface
+    if (pages.length > 0) {
+      // Find dashboard or first page for current surface
+      const dashboardPage = pages.find((p: any) => 
+        p.type === 'dashboard' || p.id.includes('dashboard') || p.id.includes('portal')
+      );
+      setCurrentPageId(dashboardPage?.id || pages[0].id);
     }
-  }, [app?.schema?.pages]);
+  }, [pages]);
 
   useEffect(() => {
     if (filteredPages.length === 0) {
@@ -813,7 +930,8 @@ export default function Preview({ id: propId }: PreviewProps) {
 
   // Dynamic layout classes based on shell configuration
   const getSidebarClasses = () => {
-    const base = 'hidden md:block border-gray-200 bg-white min-h-screen';
+    // Use surface-section for sidebar to create visual depth
+    const base = 'hidden md:block border-gray-200 bg-surface-section min-h-screen';
     const width = shell.layout?.sidebarStyle === 'compact' ? 'w-56' : 
                   shell.layout?.sidebarStyle === 'icons-only' ? 'w-16' : 'w-64';
     const border = shell.layout?.sidebarPosition === 'right' ? 'border-l' : 'border-r';
@@ -829,7 +947,8 @@ export default function Preview({ id: propId }: PreviewProps) {
   };
 
   const getHeaderClasses = () => {
-    const base = 'bg-white border-b border-gray-200';
+    // Use surface-section for header to create visual depth
+    const base = 'bg-surface-section border-b border-gray-200';
     switch (shell.layout?.headerStyle) {
       case 'minimal': return `${base} px-4 py-2`;
       case 'prominent': return `${base} px-6 py-5 shadow-sm`;
@@ -838,12 +957,44 @@ export default function Preview({ id: propId }: PreviewProps) {
   };
 
   // Transform pages for AppSidebar
-  const sidebarPages = filteredPages.map(page => ({
-    id: page.id,
-    name: page.name,
-    route: page.route,
-    type: (page as any).type || 'list',
-  }));
+  // FIXED: Use navigation.sidebar.items from schema (pre-filtered by materializer)
+  // instead of all filteredPages. This excludes form/detail pages from sidebar.
+  // WHY: The materializer filters out Add/Edit/Detail pages - we should respect that.
+  const navItems = (extendedSchema?.navigation?.sidebar?.items || []) as Array<{
+    pageId: string;
+    icon: string;
+    label: string;
+    route: string;
+  }>;
+  
+  const sidebarPages = navItems.length > 0
+    ? navItems.map(item => ({
+        id: item.pageId,
+        name: item.label,
+        route: item.route,
+        type: (filteredPages.find(p => p.id === item.pageId) as any)?.type || 'list',
+        icon: item.icon,
+      }))
+    : // Fallback: filter pages locally if navigation items not available
+      filteredPages
+        .filter(page => {
+          const pageType = (page as any).type;
+          const pageName = page.name.toLowerCase();
+          const pageId = page.id.toLowerCase();
+          
+          // Exclude form and detail pages
+          if (pageType === 'form' || pageType === 'detail') return false;
+          if (pageId.includes('-form') || pageId.includes('-detail')) return false;
+          if (pageName.startsWith('add ') || pageName.endsWith(' details')) return false;
+          
+          return true;
+        })
+        .map(page => ({
+          id: page.id,
+          name: page.name,
+          route: page.route,
+          type: (page as any).type || 'list',
+        }));
 
   return (
     <AppConfigurationProvider configuration={appConfiguration}>
@@ -863,6 +1014,7 @@ export default function Preview({ id: propId }: PreviewProps) {
       <SidebarProvider>
         <AppSidebar
           appName={cleanText(app.name)}
+          logo={(app.schema as any)?.branding?.logo || (app as any).branding?.logo}
           pages={sidebarPages}
           currentPageId={currentPageId}
           onPageSelect={setCurrentPageId}
@@ -881,6 +1033,44 @@ export default function Preview({ id: propId }: PreviewProps) {
               </h1>
             </div>
             <div className="flex items-center gap-2">
+              {/* Surface Selector - only show if multiple surfaces available */}
+              {availableSurfaces.length > 1 && (
+                <div className="flex items-center gap-1 mr-2">
+                  <span className="text-xs text-muted-foreground hidden sm:inline">View as:</span>
+                  <select
+                    value={currentSurface}
+                    onChange={(e) => {
+                      const newSurface = e.target.value as typeof currentSurface;
+                      setCurrentSurface(newSurface);
+                      // Reset to first page of the new surface
+                      const surfacePages = allPages.filter((p: any) => 
+                        newSurface === 'admin' ? (!p.surface || p.surface === 'admin') : p.surface === newSurface
+                      );
+                      if (surfacePages.length > 0) {
+                        setCurrentPageId(surfacePages[0].id);
+                      }
+                    }}
+                    className="h-8 rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {availableSurfaces.includes('admin') && (
+                      <option value="admin">🔧 Platform Admin</option>
+                    )}
+                    {availableSurfaces.includes('staff') && (
+                      <option value="staff">👷 Staff / Operator</option>
+                    )}
+                    {availableSurfaces.includes('customer') && (
+                      <option value="customer">👤 Customer</option>
+                    )}
+                    {availableSurfaces.includes('provider') && (
+                      <option value="provider">⚕️ Provider</option>
+                    )}
+                    {availableSurfaces.includes('patient') && (
+                      <option value="patient">🏥 Patient</option>
+                    )}
+                  </select>
+                </div>
+              )}
+              
               {/* Search */}
               {shell.features?.showSearch && (
                 <div className="hidden md:block w-64">
@@ -975,13 +1165,49 @@ export default function Preview({ id: propId }: PreviewProps) {
             </div>
           )}
 
-          {/* Render the app schema */}
-          <SchemaRenderer
-            components={componentInstances}
-            data={filteredData}
-            theme={app.theme}
-            onAction={handleComponentAction}
-          />
+          {/* Render the app schema - use specialized pages for settings and calendar */}
+          {(() => {
+            const pageNameLower = (currentPage?.name || '').toLowerCase()
+            const pageIdLower = (currentPage?.id || '').toLowerCase()
+            const pageType = ((currentPage as any)?.type || '').toLowerCase()
+            
+            // Settings page
+            if (pageNameLower === 'settings' || pageIdLower === 'settings') {
+              return (
+                <SettingsPage 
+                  appName={cleanText(app.name)} 
+                  primaryColor={app.theme?.colors?.primary}
+                />
+              )
+            }
+            
+            // Calendar/Schedule page
+            if (pageType === 'calendar' || pageNameLower.includes('schedule') || pageNameLower.includes('calendar') || pageIdLower.includes('schedule') || pageIdLower.includes('calendar')) {
+              return (
+                <ScheduleCalendar 
+                  primaryColor={app.theme?.colors?.primary}
+                  onAddEvent={(date) => {
+                    setNotification({ message: `Add event for ${date.toLocaleDateString()}`, type: 'success' })
+                    setTimeout(() => setNotification(null), 2000)
+                  }}
+                  onEventClick={(event) => {
+                    setNotification({ message: `Event: ${event.title}`, type: 'success' })
+                    setTimeout(() => setNotification(null), 2000)
+                  }}
+                />
+              )
+            }
+            
+            // Default: render schema
+            return (
+              <SchemaRenderer
+                components={componentInstances}
+                data={filteredData}
+                theme={app.theme}
+                onAction={handleComponentAction}
+              />
+            )
+          })()}
         </div>
         </SidebarInset>
       </SidebarProvider>

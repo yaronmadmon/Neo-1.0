@@ -89,9 +89,9 @@ export function StatsCard({
             </Badge>
           </div>
         )}
-        <CardDescription className={cn("flex items-center gap-2", change !== undefined && "pr-20")}>
+        <CardDescription className={cn("flex items-center gap-2", change !== undefined && "pr-16")}>
           {icon && <span className="text-base flex-shrink-0">{icon}</span>}
-          <span className="truncate">{title}</span>
+          <span className="text-sm font-medium leading-tight">{title}</span>
         </CardDescription>
         <CardTitle className="@[250px]/card:text-3xl text-2xl font-semibold tabular-nums">
           {displayValue}

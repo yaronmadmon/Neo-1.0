@@ -18,6 +18,18 @@ export {
   type DashboardGridProps,
   type DashboardGridItemProps,
 } from './DashboardGrid';
+export {
+  TopNavLayout,
+  TopNavItem,
+  type TopNavLayoutProps,
+  type TopNavItemProps,
+} from './TopNavLayout';
+export {
+  MasterDetailLayout,
+  MasterListItem,
+  type MasterDetailLayoutProps,
+  type MasterListItemProps,
+} from './MasterDetailLayout';
 
 /**
  * Layout type definitions for schema
@@ -29,7 +41,9 @@ export type LayoutType =
   | 'sidebar_left'
   | 'sidebar_right'
   | 'dashboard_grid'
-  | 'full_width';
+  | 'full_width'
+  | 'top_nav'
+  | 'master_detail';
 
 /**
  * Layout configuration from schema
@@ -48,6 +62,10 @@ export interface LayoutConfig {
   padding?: 'none' | 'sm' | 'md' | 'lg';
   /** Max width for single column */
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | 'full';
+  /** Master panel width for master_detail */
+  masterWidth?: 'narrow' | 'medium' | 'wide';
+  /** Nav height for top_nav */
+  navHeight?: 'sm' | 'md' | 'lg';
 }
 
 /**
@@ -61,6 +79,8 @@ export const LAYOUT_DISPLAY_NAMES: Record<LayoutType, string> = {
   'sidebar_right': 'Right Sidebar',
   'dashboard_grid': 'Dashboard Grid',
   'full_width': 'Full Width',
+  'top_nav': 'Top Navigation',
+  'master_detail': 'Master-Detail (List + Panel)',
 };
 
 /**
@@ -74,4 +94,6 @@ export const LAYOUT_DESCRIPTIONS: Record<LayoutType, string> = {
   'sidebar_right': 'Main content on left, sidebar on right',
   'dashboard_grid': 'Grid of cards/widgets',
   'full_width': 'Full width, no max-width constraint',
+  'top_nav': 'Top navigation bar with centered content',
+  'master_detail': 'List panel with side-by-side detail view',
 };

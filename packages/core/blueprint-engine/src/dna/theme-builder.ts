@@ -7,10 +7,29 @@
  * - Typography settings
  * - Spacing and layout tokens
  * - Component-specific styling
+ * 
+ * DESIGN SYSTEM INTEGRATION:
+ * The preferred way to generate themes is via design systems.
+ * Design systems are research-based, cohesive visual configurations
+ * that ensure consistent, intentional design across all apps.
+ * 
+ * Use `buildFromDesignSystem()` for new apps.
+ * Legacy `build()` method is maintained for backward compatibility.
  */
 
 import type { UnifiedTheme } from './schema.js';
 import type { SelectedLayout, ThemePreference } from '../intelligence/types.js';
+import {
+  DESIGN_SYSTEMS,
+  INDUSTRY_DESIGN_SYSTEM_MAP,
+  getDesignSystem,
+  getDesignSystemForIndustry,
+  getDesignSystemByIntent,
+  designSystemToTheme,
+  type DesignSystem,
+  type DesignSystemId,
+} from './design-systems.js';
+import { getSurfaceIntentForDesignSystem, type SurfaceIntent } from './surface-theme.js';
 
 // ============================================================
 // TYPES
@@ -578,15 +597,60 @@ const INDUSTRY_COLORS: Record<string, Partial<ColorPalette>> = {
 
 export class ThemeBuilder {
   /**
-   * Build a complete theme from context
+   * Build a complete theme from context.
+   * 
+   * IMPORTANT: This method now prefers design systems when an industry is specified.
+   * For full design system support, use buildFromDesignSystem() directly.
+   * 
+   * The method will:
+   * 1. If industry is specified, use the mapped design system
+   * 2. If keywords suggest intent, use intent-based design system
+   * 3. Otherwise, fall back to legacy preset behavior
    */
   build(ctx: ThemeBuildContext = {}): UnifiedTheme {
-    // Determine preset from user preference or keywords
-    const presetId = this.determinePreset(ctx);
-    const preset = THEME_PRESETS[presetId] || THEME_PRESETS.modern;
-
     // Get mode
     const mode = ctx.userPreference?.mode || ctx.layout?.theme.mode || 'light';
+
+    // PREFERRED PATH: Use design system if industry is specified
+    if (ctx.industry && INDUSTRY_DESIGN_SYSTEM_MAP[ctx.industry]) {
+      const designSystem = getDesignSystemForIndustry(ctx.industry);
+      const theme = designSystemToTheme(designSystem, mode);
+      const surfaceIntent = getSurfaceIntentForDesignSystem(designSystem.id);
+      
+      // Apply user preference overrides (if explicitly specified)
+      if (ctx.userPreference?.primaryColor || ctx.userPreference?.accentColor) {
+        return {
+          ...theme,
+          surfaceIntent,
+          colors: {
+            ...theme.colors,
+            ...(ctx.userPreference.primaryColor ? { primary: ctx.userPreference.primaryColor } : {}),
+            ...(ctx.userPreference.accentColor ? { accent: ctx.userPreference.accentColor } : {}),
+          },
+          customVars: {
+            ...theme.customVars,
+            '--neo-design-system-override': 'true',
+          },
+        };
+      }
+      
+      return { ...theme, surfaceIntent };
+    }
+
+    // Check if keywords suggest a design system
+    if (ctx.keywords && ctx.keywords.length > 0) {
+      const designSystemId = getDesignSystemByIntent(ctx.keywords);
+      if (designSystemId) {
+        const designSystem = getDesignSystem(designSystemId);
+        const theme = designSystemToTheme(designSystem, mode);
+        const surfaceIntent = getSurfaceIntentForDesignSystem(designSystem.id);
+        return { ...theme, surfaceIntent };
+      }
+    }
+
+    // FALLBACK: Legacy preset behavior for backward compatibility
+    const presetId = this.determinePreset(ctx);
+    const preset = THEME_PRESETS[presetId] || THEME_PRESETS.modern;
 
     // Get base colors and override with industry colors
     const baseColors = mode === 'dark' ? preset.colors.dark : preset.colors.light;
@@ -599,10 +663,12 @@ export class ThemeBuilder {
       ...(ctx.userPreference?.accentColor ? { accent: ctx.userPreference.accentColor } : {}),
     };
 
+    // Default to neutral-professional for legacy preset path
     return {
       preset: presetId as UnifiedTheme['preset'],
       colors,
       mode,
+      surfaceIntent: 'neutral-professional' as SurfaceIntent,
       typography: preset.typography,
       spacing: preset.spacing,
       shadows: preset.shadows,
@@ -611,8 +677,95 @@ export class ThemeBuilder {
     };
   }
 
+  // ============================================================
+  // DESIGN SYSTEM METHODS (PREFERRED)
+  // ============================================================
+
+  /**
+   * Build a theme from a design system (PREFERRED METHOD).
+   * 
+   * This is the recommended way to generate themes. Design systems
+   * are research-based, cohesive configurations that ensure
+   * professional, intentional design.
+   * 
+   * @param industryId - The industry ID to select a design system for
+   * @param mode - Light or dark mode
+   * @returns A complete UnifiedTheme based on the design system
+   */
+  buildFromDesignSystem(
+    industryId: string,
+    mode: 'light' | 'dark' | 'auto' = 'light'
+  ): UnifiedTheme {
+    const designSystem = getDesignSystemForIndustry(industryId);
+    return designSystemToTheme(designSystem, mode);
+  }
+
+  /**
+   * Build a theme from a specific design system ID.
+   * 
+   * Use this when you want to explicitly choose a design system
+   * rather than relying on industry mapping.
+   * 
+   * @param designSystemId - The design system ID
+   * @param mode - Light or dark mode
+   * @returns A complete UnifiedTheme based on the design system
+   */
+  buildFromDesignSystemId(
+    designSystemId: DesignSystemId,
+    mode: 'light' | 'dark' | 'auto' = 'light'
+  ): UnifiedTheme {
+    const designSystem = getDesignSystem(designSystemId);
+    return designSystemToTheme(designSystem, mode);
+  }
+
+  /**
+   * Build a theme based on keywords/intent.
+   * 
+   * Use this when you have keywords describing the desired feel
+   * but not a specific industry.
+   * 
+   * @param keywords - Keywords describing the intent
+   * @param mode - Light or dark mode
+   * @returns A complete UnifiedTheme based on matched design system
+   */
+  buildFromIntent(
+    keywords: string[],
+    mode: 'light' | 'dark' | 'auto' = 'light'
+  ): UnifiedTheme {
+    const designSystemId = getDesignSystemByIntent(keywords);
+    const designSystem = getDesignSystem(designSystemId);
+    return designSystemToTheme(designSystem, mode);
+  }
+
+  /**
+   * Get the design system that would be used for an industry.
+   * Useful for previewing or explaining design choices.
+   */
+  getDesignSystemForIndustry(industryId: string): DesignSystem {
+    return getDesignSystemForIndustry(industryId);
+  }
+
+  /**
+   * List all available design systems.
+   */
+  listDesignSystems(): DesignSystem[] {
+    return Object.values(DESIGN_SYSTEMS);
+  }
+
+  /**
+   * Get design system by ID.
+   */
+  getDesignSystem(id: DesignSystemId): DesignSystem {
+    return getDesignSystem(id);
+  }
+
+  // ============================================================
+  // LEGACY METHODS (BACKWARD COMPATIBILITY)
+  // ============================================================
+
   /**
    * Build theme from a style keyword (e.g., "modern", "make it playful")
+   * @deprecated Use buildFromDesignSystem() for new code
    */
   buildFromKeyword(keyword: string, ctx: ThemeBuildContext = {}): UnifiedTheme {
     const normalizedKeyword = keyword.toLowerCase();

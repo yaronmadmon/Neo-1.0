@@ -1,4 +1,5 @@
 import type { FieldType } from '../../types.js';
+import type { DesignSystemId } from '../../dna/design-systems.js';
 
 export type IndustryKitId =
   | 'plumber'
@@ -23,6 +24,7 @@ export type IndustryKitId =
   | 'hvac'
   | 'landscaping'
   | 'medical'
+  | 'therapy-clinic'
   | 'home-health'
   | 'general_business';
 
@@ -146,12 +148,28 @@ export interface StatusWorkflow {
   transitions: StatusTransition[];
 }
 
+// =============================================================================
+// DASHBOARD INTENT TYPES (Phase 18)
+// =============================================================================
+
+/** Time scope for metrics and data filtering */
+export type TimeScope = 'now' | 'today' | 'this-week' | 'this-month' | 'all-time';
+
+/** Section role for dashboard narrative */
+export type SectionRole = 'today' | 'in-progress' | 'upcoming' | 'summary' | 'history';
+
 /** Dashboard KPI widget */
 export interface DashboardKPI {
   label: string;
   metric: string;
   icon?: string;
   format?: 'number' | 'currency' | 'percentage';
+  /** Time scope for this KPI (for intent-aware dashboards) */
+  timeScope?: TimeScope;
+  /** Whether to visually emphasize this KPI */
+  emphasize?: boolean;
+  /** Which section role this KPI belongs to */
+  sectionRole?: SectionRole;
 }
 
 /** Dashboard chart widget */
@@ -159,6 +177,8 @@ export interface DashboardChart {
   type: 'bar' | 'line' | 'pie' | 'donut';
   title: string;
   dataQuery: string;
+  /** Time scope for chart data */
+  timeScope?: TimeScope;
 }
 
 /** Dashboard list widget */
@@ -166,6 +186,34 @@ export interface DashboardList {
   title: string;
   query: string;
   limit?: number;
+  /** Which section role this list belongs to */
+  sectionRole?: SectionRole;
+  /** Actions available for items in this list */
+  actions?: Array<{
+    actionId: string;
+    label: string;
+    visibilityRule?: 'always' | 'if-active' | 'if-pending' | 'if-overdue';
+  }>;
+}
+
+/** Industry-specific dashboard section configuration */
+export interface DashboardSectionConfig {
+  /** Custom title for "today" section */
+  todayTitle?: string;
+  /** Custom title for "in-progress" section */
+  inProgressTitle?: string;
+  /** Custom title for "upcoming" section */
+  upcomingTitle?: string;
+  /** Custom title for "summary" section */
+  summaryTitle?: string;
+  /** Primary entity for this industry (hero entity) */
+  primaryEntity?: string;
+  /** Secondary entities to feature */
+  secondaryEntities?: string[];
+  /** Domain-specific action labels (actionId → label) */
+  actionLabels?: Record<string, string>;
+  /** Domain-specific metric labels (metricId → label) */
+  metricLabels?: Record<string, string>;
 }
 
 /** Dashboard template configuration */
@@ -173,6 +221,8 @@ export interface DashboardTemplate {
   kpis: DashboardKPI[];
   charts?: DashboardChart[];
   lists?: DashboardList[];
+  /** Industry-specific section configuration for dashboard intent */
+  sectionConfig?: DashboardSectionConfig;
 }
 
 /** Business rule for validation and constraints */
@@ -194,6 +244,11 @@ export interface IndustryKit {
   dashboardType: 'operations' | 'sales' | 'service' | 'health';
   complexity: 'low' | 'medium' | 'high';
   uiStyle: 'light' | 'neutral' | 'bold';
+  /** 
+   * Design system ID - determines the visual design for apps in this industry.
+   * If not specified, the design system is selected from INDUSTRY_DESIGN_SYSTEM_MAP.
+   */
+  designSystemId?: DesignSystemId;
   requiredModules: string[];
   optionalModules: string[];
   entities: IndustryEntitySpec[];

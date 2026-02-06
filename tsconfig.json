@@ -7,6 +7,7 @@
     { "path": "./packages/core/ai-engine" },
     { "path": "./packages/core/templates" },
     { "path": "./packages/core/discovery" },
+    { "path": "./packages/core/integrations" },
     { "path": "./packages/core/blueprint-engine" },
     { "path": "./packages/core/app-generator" },
     { "path": "./packages/core/runtime" },

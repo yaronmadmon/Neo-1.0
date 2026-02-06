@@ -141,7 +141,7 @@ export {
 export { RequirementsEngine } from './lib/discovery/RequirementsEngine.js';
 export { AppBlueprintEngine } from './lib/blueprint/AppBlueprintEngine.js';
 export { ProfessionExpander } from './lib/blueprint/ProfessionExpander.js';
-export { PageGenerator } from './lib/materializer/PageGenerator.js';
+export { PageGenerator, type CustomerFeatures, type PageGeneratorInput } from './lib/materializer/PageGenerator.js';
 export { WorkflowEngine as BlueprintWorkflowEngine } from './lib/workflows/WorkflowEngine.js';
 export { DataModelGenerator } from './lib/data/DataModelGenerator.js';
 export { LayoutEngine } from './lib/ui/LayoutEngine.js';
@@ -217,6 +217,85 @@ export {
   createFieldAccessRule,
   createRowAccessRule,
   createActionAccessRule,
+} from './dna/index.js';
+
+// ============================================================
+// DESIGN SYSTEMS (Research-Based Visual Layer)
+// ============================================================
+// Core design systems with psychological intent, industry mappings,
+// and cohesive visual configurations
+export {
+  DESIGN_SYSTEMS,
+  INDUSTRY_DESIGN_SYSTEM_MAP,
+  getDesignSystem,
+  getDesignSystemForIndustry,
+  getDesignSystemByIntent,
+  designSystemToTheme,
+  listDesignSystems,
+  hasDesignSystemMapping,
+  validateThemeCoherence,
+} from './dna/index.js';
+export type {
+  DesignSystem,
+  DesignSystemId,
+  DesignSystemPalette,
+  DesignSystemTypography,
+  DesignSystemSpacing,
+  DesignSystemShadows,
+  DesignSystemAnimations,
+} from './dna/index.js';
+
+// ============================================================
+// DASHBOARD INTENT SYSTEM (Phase 18 - Semantic Dashboard Layer)
+// ============================================================
+// Story, hierarchy, KPIs, and actions with domain personality
+export {
+  // Generator
+  generateDashboardIntent,
+  getIndustrySectionConfig,
+  extendIndustrySectionConfig,
+  INDUSTRY_SECTION_CONFIGS,
+  // Entity analysis
+  findStatusEntities,
+  findSchedulableEntities,
+  findPrimaryDateField,
+  findStatusField,
+  findMetricFields,
+  // Ordering constants
+  ROLE_ORDER,
+  PRIORITY_ORDER,
+  ACTIONABLE_ROLES,
+  // Time scope helpers
+  TIME_SCOPE_LABELS,
+  TIME_SCOPE_SHORT_LABELS,
+  TIME_SCOPE_FILTERS,
+  filterByTimeScope,
+  // Action helpers
+  shouldShowAction,
+  filterVisibleActions,
+  // Validation
+  validateSection,
+  validateDashboardIntent,
+  // Sorting
+  sortSections,
+  // Display helpers
+  formatMetricLabel,
+  canHaveActions,
+  inferLayoutHint,
+} from './dna/index.js';
+
+export type {
+  SectionRole,
+  SectionPriority,
+  TimeScope,
+  LayoutHint,
+  EmphasisLevel,
+  ActionVisibilityRule,
+  DomainMetric,
+  ContextualAction,
+  DashboardSection,
+  DashboardIntent,
+  IndustrySectionConfig,
 } from './dna/index.js';
 
 // ============================================================
@@ -381,8 +460,8 @@ export class NeoEngine {
     // Step 2: Materialize into renderable format with context
     const materializedApp = this.pageMaterializer.materialize(blueprint, materializationContext);
 
-    // Step 3: Generate sample data
-    const sampleData = this.dataModelGenerator.generate(blueprint);
+    // Step 3: Generate sample data with enhanced templates
+    const sampleData = this.dataGenerator.generateSampleData(blueprint);
 
     return {
       blueprint,
@@ -511,8 +590,8 @@ export class NeoEngine {
     // Materialize into renderable format with context
     const materializedApp = this.pageMaterializer.materialize(finalBlueprint, materializationContext);
 
-    // Generate sample data
-    const sampleData = this.dataModelGenerator.generate(finalBlueprint);
+    // Generate sample data with enhanced templates
+    const sampleData = this.dataGenerator.generateSampleData(finalBlueprint);
 
     return {
       blueprint: finalBlueprint,
@@ -849,6 +928,13 @@ export class NeoEngine {
                       schema.theme.spacing?.borderRadius === 'sm' ? 'small' :
                       schema.theme.spacing?.borderRadius === 'lg' ? 'large' : 'medium',
         fontFamily: schema.theme.typography?.fontFamily,
+        // Extended design system support
+        typography: schema.theme.typography,
+        spacing: schema.theme.spacing,
+        shadows: schema.theme.shadows,
+        animations: schema.theme.animations,
+        // Custom CSS variables from design system (includes --neo-design-system)
+        customVars: schema.theme.customVars,
       },
       settings: schema.settings,
     };

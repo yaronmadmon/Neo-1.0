@@ -57,12 +57,20 @@ export const UnifiedFieldSchema = z.object({
   display: z.object({
     hidden: z.boolean().optional(),
     readonly: z.boolean().optional(),
+    writeOnce: z.boolean().optional(),  // Field cannot be modified after creation
     width: z.enum(['xs', 'sm', 'md', 'lg', 'xl', 'full']).optional(),
     format: z.string().optional(),
     placeholder: z.string().optional(),
     helpText: z.string().optional(),
     prefix: z.string().optional(),
     suffix: z.string().optional(),
+  }).optional(),
+  
+  // Access control for field-level permissions
+  access: z.object({
+    visibleTo: z.array(z.string()).optional(),   // Roles that can see this field
+    editableBy: z.array(z.string()).optional(),  // Roles that can edit this field
+    requiredApproval: z.boolean().optional(),    // Requires approval before patient sees
   }).optional(),
   
   // Computed field
@@ -278,6 +286,11 @@ export type UnifiedLayout = z.infer<typeof UnifiedLayoutSchema>;
 // PAGE SCHEMA
 // ============================================================
 
+// Surface type - determines the page audience
+// Supports multi-surface apps: admin, staff, provider, customer/patient
+export const SurfaceTypeSchema = z.enum(['admin', 'staff', 'provider', 'customer', 'patient']);
+export type SurfaceType = z.infer<typeof SurfaceTypeSchema>;
+
 export const UnifiedPageSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -286,10 +299,31 @@ export const UnifiedPageSchema = z.object({
     'list', 'detail', 'form', 'dashboard',
     'calendar', 'kanban', 'table', 'gallery',
     'timeline', 'map', 'chart', 'report',
-    'wizard', 'settings', 'profile', 'custom',
+    'wizard', 'settings', 'custom',
+    'profile',        // User/customer profile page
+    // Customer-specific page types (e-commerce)
+    'menu',           // Product/service catalog for customers
+    'cart',           // Shopping cart
+    'checkout',       // Checkout/payment flow
+    'booking',        // Appointment/reservation booking
+    'order_tracking', // Customer order status tracking
+    'customer_portal', // Customer dashboard/home
+    // Tenant/member portal page types
+    'tenant_portal',  // Tenant/member dashboard/home
+    'lease_view',     // View lease/contract details
+    'rent_payment',   // Pay rent/dues online
+    'maintenance_request', // Submit and track maintenance requests
+    'document_library',    // View/download documents
+    'notices_board',       // View announcements/notices
+    'message_center',      // Messages with admin/staff
+    'facility_booking',    // Book amenities/facilities
   ]),
   description: z.string().optional(),
   icon: z.string().optional(),
+  
+  // Surface - determines if this page is internal (admin) or customer-facing
+  // Optional for backward compatibility - defaults to 'admin' when not specified
+  surface: SurfaceTypeSchema.optional(),
   
   // Entity binding
   entity: z.string().optional(),
@@ -359,6 +393,42 @@ export const UnifiedPageSchema = z.object({
         title: z.string(),
         span: z.number().optional(),
         config: z.record(z.unknown()).optional(),
+      })).optional(),
+      
+      // Dashboard Intent - semantic structure for story, hierarchy, and actions
+      intent: z.array(z.object({
+        id: z.string(),
+        role: z.enum(['today', 'in-progress', 'upcoming', 'summary', 'history']),
+        priority: z.enum(['primary', 'secondary', 'tertiary']),
+        title: z.string(),
+        subtitle: z.string().optional(),
+        timeScope: z.enum(['now', 'today', 'this-week', 'this-month', 'all-time']).optional(),
+        layoutHint: z.enum(['stats-row', 'card-list', 'data-table', 'chart', 'activity', 'calendar', 'kanban']).optional(),
+        
+        // Metrics for summary/today sections
+        metrics: z.array(z.object({
+          sourceMetric: z.string(),
+          label: z.string(),
+          timeScope: z.enum(['now', 'today', 'this-week', 'this-month', 'all-time']),
+          emphasize: z.boolean().optional(),
+          icon: z.string().optional(),
+          format: z.enum(['number', 'currency', 'percentage', 'duration']).optional(),
+        })).optional(),
+        
+        // List entity for in-progress/upcoming sections
+        listEntity: z.string().optional(),
+        listFilter: z.string().optional(),
+        limit: z.number().optional(),
+        
+        // Contextual actions (only for actionable sections)
+        actions: z.array(z.object({
+          actionId: z.string(),
+          label: z.string(),
+          entity: z.string(),
+          visibilityRule: z.enum(['always', 'if-active', 'if-pending', 'if-empty', 'if-overdue']),
+          variant: z.enum(['primary', 'secondary', 'destructive']).optional(),
+          icon: z.string().optional(),
+        })).optional(),
       })).optional(),
     }).optional(),
     
@@ -526,41 +596,47 @@ export type UnifiedWorkflow = z.infer<typeof UnifiedWorkflowSchema>;
 // NAVIGATION SCHEMA
 // ============================================================
 
+// Sidebar menu item schema (reusable)
+const SidebarMenuItemSchema = z.object({
+  pageId: z.string(),
+  label: z.string(),
+  icon: z.string().optional(),
+  badge: z.string().optional(),
+  children: z.array(z.object({
+    pageId: z.string(),
+    label: z.string(),
+    icon: z.string().optional(),
+  })).optional(),
+});
+
+// Sidebar configuration schema (reusable for admin and customer)
+const SidebarConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  position: z.enum(['left', 'right']).default('left'),
+  collapsible: z.boolean().default(true),
+  defaultCollapsed: z.boolean().optional(),
+  width: z.string().optional(),
+  
+  // Menu items (grouped)
+  groups: z.array(z.object({
+    id: z.string(),
+    label: z.string().optional(),
+    collapsible: z.boolean().optional(),
+    items: z.array(SidebarMenuItemSchema),
+  })),
+  
+  // Footer items (settings, logout, etc)
+  footerItems: z.array(z.object({
+    pageId: z.string().optional(),
+    action: z.string().optional(),
+    label: z.string(),
+    icon: z.string().optional(),
+  })).optional(),
+});
+
 export const UnifiedNavigationSchema = z.object({
-  // Sidebar configuration
-  sidebar: z.object({
-    enabled: z.boolean().default(true),
-    position: z.enum(['left', 'right']).default('left'),
-    collapsible: z.boolean().default(true),
-    defaultCollapsed: z.boolean().optional(),
-    width: z.string().optional(),
-    
-    // Menu items (grouped)
-    groups: z.array(z.object({
-      id: z.string(),
-      label: z.string().optional(),
-      collapsible: z.boolean().optional(),
-      items: z.array(z.object({
-        pageId: z.string(),
-        label: z.string(),
-        icon: z.string().optional(),
-        badge: z.string().optional(),
-        children: z.array(z.object({
-          pageId: z.string(),
-          label: z.string(),
-          icon: z.string().optional(),
-        })).optional(),
-      })),
-    })),
-    
-    // Footer items (settings, logout, etc)
-    footerItems: z.array(z.object({
-      pageId: z.string().optional(),
-      action: z.string().optional(),
-      label: z.string(),
-      icon: z.string().optional(),
-    })).optional(),
-  }).optional(),
+  // Sidebar configuration (admin/internal)
+  sidebar: SidebarConfigSchema.optional(),
   
   // Top navbar configuration
   navbar: z.object({
@@ -608,6 +684,44 @@ export const UnifiedNavigationSchema = z.object({
 
 export type UnifiedNavigation = z.infer<typeof UnifiedNavigationSchema>;
 
+// Customer Navigation Schema - separate navigation for customer surface
+export const CustomerNavigationSchema = z.object({
+  // Sidebar configuration (customer-friendly)
+  sidebar: SidebarConfigSchema.optional(),
+  
+  // Top navbar configuration (simpler for customers)
+  navbar: z.object({
+    enabled: z.boolean().default(true),
+    showLogo: z.boolean().default(true),
+    showSearch: z.boolean().optional(),
+    showCart: z.boolean().optional(),      // Shopping cart icon
+    showProfile: z.boolean().optional(),   // Customer profile menu
+    showNotifications: z.boolean().optional(),
+  }).optional(),
+  
+  // Navigation rules
+  rules: z.array(z.object({
+    id: z.string(),
+    from: z.string(),
+    to: z.string(),
+    trigger: z.enum(['link', 'button', 'auto', 'action']),
+    condition: z.string().optional(),
+    params: z.record(z.string()).optional(),
+  })),
+  
+  // Default page for customers
+  defaultPage: z.string(),
+  
+  // Quick links (menu, orders, profile)
+  quickLinks: z.array(z.object({
+    pageId: z.string(),
+    label: z.string(),
+    icon: z.string().optional(),
+  })).optional(),
+});
+
+export type CustomerNavigation = z.infer<typeof CustomerNavigationSchema>;
+
 // ============================================================
 // THEME SCHEMA
 // ============================================================
@@ -638,6 +752,15 @@ export const UnifiedThemeSchema = z.object({
   
   // Mode
   mode: z.enum(['light', 'dark', 'auto']).default('light'),
+  
+  // Surface Intent - controls atmosphere and visual depth
+  // This is separate from colors and can be mixed with any design system
+  surfaceIntent: z.enum([
+    'warm-artisanal',      // Bakery, craft, hospitality - warm & cozy
+    'neutral-professional', // Business, admin, enterprise - clean & trustworthy
+    'modern-dark',          // Tech, dashboards, analytics - focused & immersive
+    'playful-light',        // Retail, consumer, education - friendly & approachable
+  ]).optional(),
   
   // Typography
   typography: z.object({
@@ -687,6 +810,149 @@ export type UnifiedTheme = z.infer<typeof UnifiedThemeSchema>;
 // UNIFIED APP SCHEMA
 // ============================================================
 
+// Customer features schema - what customers can do in the customer surface
+// Supports both e-commerce customers AND tenant/member portals
+export const CustomerFeaturesSchema = z.object({
+  // === E-commerce Features ===
+  browseCatalog: z.boolean().optional(),      // Browse products/services/menu
+  placeOrders: z.boolean().optional(),        // Place orders
+  bookAppointments: z.boolean().optional(),   // Book appointments/reservations
+  trackOrders: z.boolean().optional(),        // Track order/appointment status
+  manageProfile: z.boolean().optional(),      // Manage customer profile
+  viewHistory: z.boolean().optional(),        // View order/appointment history
+  usePromotions: z.boolean().optional(),      // Use coupons/promotions
+  makePayments: z.boolean().optional(),       // Make payments online
+  receiveNotifications: z.boolean().optional(), // Receive notifications
+  
+  // === Tenant/Member Portal Features ===
+  // For property management, gyms, HOAs, schools, clinics, etc.
+  viewLease: z.boolean().optional(),          // View lease/contract details
+  payRent: z.boolean().optional(),            // Pay rent/dues/fees
+  submitMaintenanceRequest: z.boolean().optional(), // Submit maintenance/support requests
+  viewMaintenanceStatus: z.boolean().optional(),    // Track maintenance request status
+  viewDocuments: z.boolean().optional(),      // View/download documents (leases, notices, etc.)
+  uploadDocuments: z.boolean().optional(),    // Upload documents
+  viewNotices: z.boolean().optional(),        // View notices/announcements/messages
+  sendMessages: z.boolean().optional(),       // Send messages to admin/staff
+  viewSchedule: z.boolean().optional(),       // View schedules/calendars
+  makeReservations: z.boolean().optional(),   // Make facility reservations (amenities, etc.)
+});
+
+export type CustomerFeatures = z.infer<typeof CustomerFeaturesSchema>;
+
+// Provider features schema - what providers can do in their surface
+export const ProviderFeaturesSchema = z.object({
+  viewAssignedPatients: z.boolean().optional(),    // View only assigned patients
+  viewSchedule: z.boolean().optional(),            // View their own schedule
+  manageAvailability: z.boolean().optional(),      // Set availability slots
+  createTreatmentNotes: z.boolean().optional(),    // Create clinical notes (write-once)
+  viewPatientHistory: z.boolean().optional(),      // View patient treatment history
+  viewPatientDocuments: z.boolean().optional(),    // View patient documents
+  sendMessages: z.boolean().optional(),            // Message patients
+  createPrescriptions: z.boolean().optional(),     // Create prescriptions
+  createReferrals: z.boolean().optional(),         // Create referrals
+  viewBilling: z.boolean().optional(),             // View billing for their services
+});
+
+export type ProviderFeatures = z.infer<typeof ProviderFeaturesSchema>;
+
+// Staff/Operator features schema - what staff can do in their surface
+// For location-based operators, field workers, or non-admin internal users
+export const StaffFeaturesSchema = z.object({
+  // Location & Assignment
+  viewAssignedLocation: z.boolean().optional(),      // View only their assigned location
+  viewAssignedItems: z.boolean().optional(),         // View only items at their location
+  
+  // Item/Task Management
+  intakeItems: z.boolean().optional(),               // Receive/intake new items
+  processItems: z.boolean().optional(),              // Process items (scan, update status)
+  executeActions: z.boolean().optional(),            // Execute customer-requested actions
+  updateItemStatus: z.boolean().optional(),          // Update item status
+  uploadAttachments: z.boolean().optional(),         // Upload photos/documents
+  
+  // Workflow & Queue
+  viewWorkQueue: z.boolean().optional(),             // View pending work queue
+  viewDailyTasks: z.boolean().optional(),            // View daily task list
+  markTaskComplete: z.boolean().optional(),          // Mark tasks as complete
+  
+  // Fulfillment
+  recordFulfillment: z.boolean().optional(),         // Record fulfillment details
+  recordTracking: z.boolean().optional(),            // Record tracking numbers
+  confirmPickup: z.boolean().optional(),             // Confirm customer pickup
+  confirmAction: z.boolean().optional(),             // Confirm action completion
+  
+  // Communication
+  sendNotifications: z.boolean().optional(),         // Send notifications to customers
+  viewCustomerInfo: z.boolean().optional(),          // View basic customer info (for fulfillment)
+  
+  // Schedule
+  viewSchedule: z.boolean().optional(),              // View work schedule
+  viewShiftDetails: z.boolean().optional(),          // View shift details
+});
+
+export type StaffFeatures = z.infer<typeof StaffFeaturesSchema>;
+
+// Patient features schema - what patients can do in their surface
+export const PatientFeaturesSchema = z.object({
+  viewProfile: z.boolean().optional(),             // View their own profile
+  updateProfile: z.boolean().optional(),           // Update contact info
+  viewAppointments: z.boolean().optional(),        // View their appointments
+  bookAppointments: z.boolean().optional(),        // Book new appointments
+  cancelAppointments: z.boolean().optional(),      // Cancel appointments
+  viewTreatmentNotes: z.boolean().optional(),      // View approved notes only
+  viewDocuments: z.boolean().optional(),           // View their documents
+  uploadDocuments: z.boolean().optional(),         // Upload documents (consents, etc.)
+  viewBilling: z.boolean().optional(),             // View their bills
+  makePayments: z.boolean().optional(),            // Make payments
+  sendMessages: z.boolean().optional(),            // Message providers
+  viewMessages: z.boolean().optional(),            // View messages
+  submitForms: z.boolean().optional(),             // Submit intake forms
+});
+
+export type PatientFeatures = z.infer<typeof PatientFeaturesSchema>;
+
+// Surfaces configuration - which app surfaces are enabled
+// Supports multi-surface apps: admin, staff, provider, customer/patient
+export const SurfacesConfigSchema = z.object({
+  // Admin/internal surface (always enabled)
+  admin: z.object({
+    enabled: z.boolean().default(true),
+    defaultPage: z.string().optional(),
+  }).default({ enabled: true }),
+  
+  // Staff/Operator surface (for location-based staff, field workers, operators)
+  // Non-admin internal users with restricted access to their assigned location/items
+  staff: z.object({
+    enabled: z.boolean().default(false),
+    defaultPage: z.string().optional(),
+    features: StaffFeaturesSchema.optional(),
+  }).default({ enabled: false }),
+  
+  // Provider surface (for doctors, therapists, etc.)
+  provider: z.object({
+    enabled: z.boolean().default(false),
+    defaultPage: z.string().optional(),
+    features: ProviderFeaturesSchema.optional(),
+  }).default({ enabled: false }),
+  
+  // Customer surface (auto-enabled when customer-facing features detected)
+  customer: z.object({
+    enabled: z.boolean().default(false),
+    defaultPage: z.string().optional(),
+    // Customer surface capabilities
+    features: CustomerFeaturesSchema.optional(),
+  }).default({ enabled: false }),
+  
+  // Patient surface (alias for customer in medical context)
+  patient: z.object({
+    enabled: z.boolean().default(false),
+    defaultPage: z.string().optional(),
+    features: PatientFeaturesSchema.optional(),
+  }).default({ enabled: false }),
+}).optional();
+
+export type SurfacesConfig = z.infer<typeof SurfacesConfigSchema>;
+
 export const UnifiedAppSchemaDefinition = z.object({
   // Metadata
   id: z.string(),
@@ -699,11 +965,32 @@ export const UnifiedAppSchemaDefinition = z.object({
   behavior: z.string().optional(),
   industry: z.string().optional(),
   
-  // Core components
-  entities: z.array(UnifiedEntitySchema),
-  pages: z.array(UnifiedPageSchema),
-  workflows: z.array(UnifiedWorkflowSchema),
+  // Surfaces configuration - determines which surfaces are active
+  // Customer surface auto-enabled when customer-facing intent detected
+  // Optional for backward compatibility
+  surfaces: SurfacesConfigSchema,
+  
+  // Core components - SHARED between surfaces (single source of truth)
+  entities: z.array(UnifiedEntitySchema),    // Same entities for admin and customer
+  pages: z.array(UnifiedPageSchema),         // Pages marked with 'surface' field
+  workflows: z.array(UnifiedWorkflowSchema), // Same workflows, permissions control access
+  
+  // Admin navigation (internal/staff)
   navigation: UnifiedNavigationSchema,
+  
+  // Staff/Operator navigation (for location-based staff, separate from admin)
+  staffNavigation: CustomerNavigationSchema.optional(),
+  
+  // Provider navigation (for healthcare/service providers)
+  providerNavigation: CustomerNavigationSchema.optional(),
+  
+  // Patient navigation (for medical apps - alias for customer in healthcare context)
+  patientNavigation: CustomerNavigationSchema.optional(),
+  
+  // Customer navigation (separate from admin, only present when customer surface enabled)
+  customerNavigation: CustomerNavigationSchema.optional(),
+  
+  // Theme - can be shared or have customer-specific overrides
   theme: UnifiedThemeSchema,
   
   // Global settings

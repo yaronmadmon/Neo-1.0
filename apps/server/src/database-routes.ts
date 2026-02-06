@@ -1,14 +1,37 @@
 /**
  * Database API Routes
  * RESTful endpoints for entity CRUD operations
+ * 
+ * PERMISSION ENFORCEMENT:
+ * - User context extracted from request headers/cookies
+ * - Row-level security applied automatically for tenant/member portals
+ * - Field-level restrictions based on user role
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { logger } from './utils/logger.js';
+import {
+  extractUserContext,
+  checkPermission,
+  filterFields,
+  mergeFilters,
+  autoPopulateOwnership,
+  type UserContext,
+  type PermissionRule,
+} from './permissions-middleware.js';
 
 // Import types - actual database service will be lazily loaded
 let DatabaseService: typeof import('@neo/database').DatabaseService | null = null;
 let dbService: InstanceType<typeof import('@neo/database').DatabaseService> | null = null;
+
+// Extend request type to include permission context
+declare module 'fastify' {
+  interface FastifyRequest {
+    userContext?: UserContext;
+    permissionFilter?: Record<string, unknown>;
+    permissionRule?: PermissionRule;
+  }
+}
 
 /**
  * Initialize database service
@@ -102,6 +125,11 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
   /**
    * Create a record
    * POST /db/apps/:appId/entities/:entityId/records
+   * 
+   * PERMISSION ENFORCEMENT:
+   * - Checks if user has create permission
+   * - Auto-populates ownership fields (e.g., tenantId for tenant-created records)
+   * - Filters input fields based on permissions
    */
   server.post<{
     Params: { appId: string; entityId: string };
@@ -113,12 +141,44 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
 
       try {
         const { appId, entityId } = request.params;
-        const data = request.body;
+        let data = request.body;
+
+        // === PERMISSION CHECK ===
+        const userContext = extractUserContext(request);
+        const permissionCheck = checkPermission(userContext, entityId, 'create');
+        
+        if (!permissionCheck.allowed) {
+          logger.warn('Permission denied for create', { 
+            userId: userContext?.userId, 
+            role: userContext?.role, 
+            entityId 
+          });
+          return reply.code(403).send({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to create this record',
+          });
+        }
+
+        // === AUTO-POPULATE OWNERSHIP ===
+        // For tenant portals, auto-set the ownership field (e.g., tenantId, reportedBy)
+        data = autoPopulateOwnership(entityId, data, userContext);
+
+        // === FILTER INPUT FIELDS ===
+        // Only allow fields the user has permission to set
+        if (permissionCheck.rule) {
+          data = filterFields(data, permissionCheck.rule);
+        }
 
         const db = await getDbService();
         const result = await db.create(entityId, data);
 
-        logger.info('Record created', { appId, entityId, recordId: (result.data as any)?.id });
+        logger.info('Record created', { 
+          appId, 
+          entityId, 
+          recordId: (result.data as any)?.id,
+          userId: userContext?.userId 
+        });
 
         return reply.code(201).send({
           success: true,
@@ -186,6 +246,11 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
   /**
    * Get records (list with filters, sorting, pagination)
    * GET /db/apps/:appId/entities/:entityId/records
+   * 
+   * PERMISSION ENFORCEMENT:
+   * - Extracts user context from request
+   * - Applies row-level filters based on user's ownership
+   * - Filters out fields the user cannot see
    */
   server.get<{
     Params: { appId: string; entityId: string };
@@ -206,6 +271,23 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
       try {
         const { appId, entityId } = request.params;
         const { page, limit, sort, sortDir, filter, include, select } = request.query;
+
+        // === PERMISSION CHECK ===
+        const userContext = extractUserContext(request);
+        const permissionCheck = checkPermission(userContext, entityId, 'read');
+        
+        if (!permissionCheck.allowed) {
+          logger.warn('Permission denied for list', { 
+            userId: userContext?.userId, 
+            role: userContext?.role, 
+            entityId 
+          });
+          return reply.code(403).send({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to access this data',
+          });
+        }
 
         // Parse query options
         const pageNum = parseInt(page || '1', 10);
@@ -228,6 +310,11 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
           }
         }
 
+        // === APPLY PERMISSION FILTER ===
+        // Merge user filters with permission-based row filters
+        // This ensures tenants can only see their own data
+        filters = mergeFilters(filters, permissionCheck.filter) as any[];
+
         // Parse includes
         const includes = include ? include.split(',').map(r => ({ relation: r.trim() })) : undefined;
 
@@ -243,9 +330,17 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
           select: selectFields,
         });
 
+        // === FILTER FIELDS BASED ON PERMISSIONS ===
+        let records = result.data;
+        if (permissionCheck.rule) {
+          records = (result.data as Record<string, unknown>[]).map(record => 
+            filterFields(record, permissionCheck.rule)
+          );
+        }
+
         return reply.send({
           success: true,
-          records: result.data,
+          records,
           pagination: {
             page: pageNum,
             limit: limitNum,
@@ -268,6 +363,11 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
   /**
    * Get a single record by ID
    * GET /db/apps/:appId/entities/:entityId/records/:recordId
+   * 
+   * PERMISSION ENFORCEMENT:
+   * - Checks if user has read permission
+   * - Verifies ownership for tenant/member portals
+   * - Filters out restricted fields
    */
   server.get<{
     Params: { appId: string; entityId: string; recordId: string };
@@ -280,6 +380,24 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
       try {
         const { appId, entityId, recordId } = request.params;
         const { include } = request.query;
+
+        // === PERMISSION CHECK ===
+        const userContext = extractUserContext(request);
+        const permissionCheck = checkPermission(userContext, entityId, 'read');
+        
+        if (!permissionCheck.allowed) {
+          logger.warn('Permission denied for read', { 
+            userId: userContext?.userId, 
+            role: userContext?.role, 
+            entityId,
+            recordId 
+          });
+          return reply.code(403).send({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to access this record',
+          });
+        }
 
         const includes = include ? include.split(',').map(r => ({ relation: r.trim() })) : undefined;
 
@@ -294,9 +412,38 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
           });
         }
 
+        // === VERIFY OWNERSHIP ===
+        // If permission requires ownership, verify the record belongs to the user
+        if (permissionCheck.filter && result.data) {
+          const record = result.data as Record<string, unknown>;
+          for (const [field, expectedValue] of Object.entries(permissionCheck.filter)) {
+            if (record[field] !== expectedValue) {
+              logger.warn('Ownership verification failed', { 
+                userId: userContext?.userId, 
+                entityId, 
+                recordId,
+                field,
+                expected: expectedValue,
+                actual: record[field]
+              });
+              return reply.code(403).send({
+                success: false,
+                error: 'Forbidden',
+                message: 'You do not have permission to access this record',
+              });
+            }
+          }
+        }
+
+        // === FILTER FIELDS ===
+        let record = result.data as Record<string, unknown>;
+        if (permissionCheck.rule) {
+          record = filterFields(record, permissionCheck.rule);
+        }
+
         return reply.send({
           success: true,
-          record: result.data,
+          record,
         });
       } catch (error: any) {
         logger.error('Get record failed', error);
@@ -312,6 +459,11 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
   /**
    * Update a record
    * PUT /db/apps/:appId/entities/:entityId/records/:recordId
+   * 
+   * PERMISSION ENFORCEMENT:
+   * - Checks if user has update permission
+   * - Verifies ownership before allowing update
+   * - Filters input fields based on permissions
    */
   server.put<{
     Params: { appId: string; entityId: string; recordId: string };
@@ -323,12 +475,63 @@ export async function registerDatabaseRoutes(server: FastifyInstance): Promise<v
 
       try {
         const { appId, entityId, recordId } = request.params;
-        const data = request.body;
+        let data = request.body;
+
+        // === PERMISSION CHECK ===
+        const userContext = extractUserContext(request);
+        const permissionCheck = checkPermission(userContext, entityId, 'update');
+        
+        if (!permissionCheck.allowed) {
+          logger.warn('Permission denied for update', { 
+            userId: userContext?.userId, 
+            role: userContext?.role, 
+            entityId,
+            recordId 
+          });
+          return reply.code(403).send({
+            success: false,
+            error: 'Forbidden',
+            message: 'You do not have permission to update this record',
+          });
+        }
 
         const db = await getDbService();
+
+        // === VERIFY OWNERSHIP ===
+        if (permissionCheck.filter) {
+          const existing = await db.findById(entityId, recordId);
+          if (existing.found && existing.data) {
+            const record = existing.data as Record<string, unknown>;
+            for (const [field, expectedValue] of Object.entries(permissionCheck.filter)) {
+              if (record[field] !== expectedValue) {
+                logger.warn('Ownership verification failed for update', { 
+                  userId: userContext?.userId, 
+                  entityId, 
+                  recordId 
+                });
+                return reply.code(403).send({
+                  success: false,
+                  error: 'Forbidden',
+                  message: 'You do not have permission to update this record',
+                });
+              }
+            }
+          }
+        }
+
+        // === FILTER INPUT FIELDS ===
+        if (permissionCheck.rule) {
+          data = filterFields(data, permissionCheck.rule);
+        }
+
         const result = await db.update(entityId, recordId, data);
 
-        logger.info('Record updated', { appId, entityId, recordId });
+        logger.info('Record updated', { 
+          appId, 
+          entityId, 
+          recordId,
+          userId: userContext?.userId 
+        });
 
         return reply.send({
           success: true,

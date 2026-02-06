@@ -17,6 +17,7 @@ let discoveryHandler: any;
 let mandatoryDiscoveryHandler: any;
 let smartDiscoveryHandler: any;
 let aiDiscoveryHandler: any; // AI-powered discovery with dynamic questions
+let aiProviderForDiscovery: any; // AI provider for conversational discovery
 let appGenerator: any;
 let neoEngine: any;
 let safetyOrchestrator: any;
@@ -37,6 +38,7 @@ export async function registerAppRoutes(
     mandatoryDiscoveryHandler: any;
     smartDiscoveryHandler?: any;
     aiDiscoveryHandler?: any; // AI-powered discovery
+    aiProviderForDiscovery?: any; // AI provider for conversational discovery
     appGenerator: any;
     neoEngine: any;
     safetyOrchestrator: any;
@@ -53,6 +55,7 @@ export async function registerAppRoutes(
   mandatoryDiscoveryHandler = dependencies.mandatoryDiscoveryHandler;
   smartDiscoveryHandler = dependencies.smartDiscoveryHandler;
   aiDiscoveryHandler = dependencies.aiDiscoveryHandler;
+  aiProviderForDiscovery = dependencies.aiProviderForDiscovery;
   appGenerator = dependencies.appGenerator;
   neoEngine = dependencies.neoEngine;
   safetyOrchestrator = dependencies.safetyOrchestrator;
@@ -458,7 +461,11 @@ export async function registerAppRoutes(
 
         // Import the conversational handler dynamically
         const { ConversationalDiscoveryHandler } = await import('@neo/discovery');
-        const chatHandler = new ConversationalDiscoveryHandler();
+        
+        // IMPORTANT: Pass the AI provider so we get real AI-powered analysis
+        // Without this, the handler falls back to keyword-only matching which
+        // doesn't understand natural language properly
+        const chatHandler = new ConversationalDiscoveryHandler(aiProviderForDiscovery);
 
         if (action === 'start') {
           const result = await chatHandler.startConversation(input);
@@ -472,9 +479,34 @@ export async function registerAppRoutes(
             originalInput: originalInput || state.originalInput || '',
             questionsAsked: (state as any).questionsAsked || [],
             confidence: (state as any).confidence || 0.3,
+            // Pass through state fields for smart discovery flow
+            userConfirmed: (state as any).userConfirmed || false,
+            pendingConfirmation: (state as any).pendingConfirmation || false,
+            questionCount: (state as any).questionCount || 0,
+            enabledFeatures: (state as any).enabledFeatures || [],
+            answers: (state as any).answers || {},
+            detectedIndustry: (state as any).detectedIndustry || state.collectedInfo?.industry,
           };
 
+          // DEBUG: Log what state we're receiving
+          console.log('📥 Smart Discovery - incoming state:', {
+            step: conversationState.step,
+            questionCount: conversationState.questionCount,
+            pendingConfirmation: conversationState.pendingConfirmation,
+            enabledFeatures: conversationState.enabledFeatures,
+          });
+
           const result = await chatHandler.continueConversation(input, conversationState);
+          
+          // DEBUG: Log what we're sending back
+          console.log('📤 Smart Discovery - outgoing state:', {
+            step: result.step,
+            questionCount: (result as any).questionCount,
+            pendingConfirmation: (result as any).pendingConfirmation,
+            enabledFeatures: (result as any).enabledFeatures,
+            complete: result.complete,
+          });
+          
           return reply.code(200).type('application/json').send(result);
         }
 
@@ -484,8 +516,7 @@ export async function registerAppRoutes(
       } catch (error: any) {
         console.error('Chat discovery error:', error);
         return reply.code(200).type('application/json').send({
-          message: "Oops! I had a hiccup. Let me try again... What kind of app are you building?",
-          quickReplies: ['Restaurant', 'Salon', 'Fitness', 'Real Estate', 'Other'],
+          message: "I had a small issue. Let me try again - can you tell me about your business?",
           complete: false,
           step: 1,
           collectedInfo: {},
@@ -567,6 +598,57 @@ export async function registerAppRoutes(
         
         // Generate app using neoEngine
         // Map appConfig from discovery to discoveredInfo for the AI pipeline
+        // IMPORTANT: Include features from collected info for richer app generation
+        
+        // Extract features from appConfig - can come from multiple sources
+        const extractedFeatures: string[] = [];
+        if (appConfig) {
+          // Direct features array
+          if (Array.isArray(appConfig.features)) {
+            extractedFeatures.push(...appConfig.features);
+          }
+          // Features from services (emergency repair -> scheduling, invoicing)
+          if (Array.isArray(appConfig.services)) {
+            for (const service of appConfig.services) {
+              const svc = String(service).toLowerCase();
+              if (/emergency|urgent|repair/i.test(svc)) {
+                extractedFeatures.push('scheduling', 'notifications', 'job_tracking');
+              }
+              if (/install|installation/i.test(svc)) {
+                extractedFeatures.push('job_tracking', 'quotes', 'invoicing');
+              }
+            }
+          }
+          // Features from pain points
+          if (Array.isArray(appConfig.painPoints)) {
+            for (const pain of appConfig.painPoints) {
+              const p = String(pain).toLowerCase();
+              if (/payment|collect|billing/i.test(p)) {
+                extractedFeatures.push('invoicing', 'payments');
+              }
+              if (/sales|closing/i.test(p)) {
+                extractedFeatures.push('quotes', 'pipelines');
+              }
+              if (/schedule|booking/i.test(p)) {
+                extractedFeatures.push('scheduling', 'calendar');
+              }
+            }
+          }
+          // Direct feature keywords
+          if (appConfig.mainFeature) {
+            extractedFeatures.push(appConfig.mainFeature);
+          }
+          // Scanner feature
+          if (appConfig.scanner || /scanner/i.test(String(appConfig.originalDescription || ''))) {
+            extractedFeatures.push('file_upload', 'documents');
+          }
+        }
+        
+        // Dedupe features
+        const uniqueFeatures = [...new Set(extractedFeatures)];
+        
+        console.log('🎯 Features extracted for app generation:', uniqueFeatures);
+        
         const processedIntent: ProcessedIntent = {
           rawInput: input,
           type: 'create_app',
@@ -577,6 +659,18 @@ export async function registerAppRoutes(
             teamSize: appConfig.teamSize,
             offerType: appConfig.offerType,
             onlineAcceptance: appConfig.onlineAcceptance,
+            // NOW INCLUDES FEATURES for richer app generation!
+            features: uniqueFeatures.length > 0 ? uniqueFeatures : undefined,
+            // Pass through additional context
+            services: appConfig.services,
+            painPoints: appConfig.painPoints,
+            // Theme/vibe preset from discovery (maps to theme-builder presets)
+            themePreset: appConfig.themePreset,
+            // Business name for app branding
+            businessName: appConfig.businessName,
+            // DUAL-SURFACE: Customer-facing flags for generating customer portal
+            customerFacing: appConfig.customerFacing,
+            customerFeatures: appConfig.customerFeatures,
           } : undefined,
           extractedDetails: category ? { category: String(category) } : undefined,
         };
@@ -584,6 +678,13 @@ export async function registerAppRoutes(
 
         const now = new Date();
         const resolvedCategory = category || AppCategory.PERSONAL;
+        const schemaWithBranding = {
+          ...materializedAppToSchema(generated.materializedApp),
+          branding: generated.blueprint.branding,
+          // DUAL-SURFACE: Include surfaces config and customer navigation from blueprint
+          surfaces: generated.blueprint.surfaces,
+          customerNavigation: generated.blueprint.customerNavigation,
+        };
         const app: App = {
           id: generated.blueprint.id,
           name: generated.blueprint.name,
@@ -594,7 +695,7 @@ export async function registerAppRoutes(
           createdAt: now,
           updatedAt: now,
           createdBy: preferences?.userId || randomUUID(),
-          schema: materializedAppToSchema(generated.materializedApp),
+          schema: schemaWithBranding,
           theme: materializedAppToTheme(generated.materializedApp),
           data: generated.sampleData,
           settings: {
@@ -850,6 +951,118 @@ export async function registerAppRoutes(
           success: false,
           error: 'Internal server error',
           message: error?.message || 'An error occurred while retrieving the app',
+        });
+      }
+    }
+  );
+
+  /**
+   * Development endpoint - Import pre-built app schema directly
+   * POST /api/apps/import
+   * 
+   * This endpoint allows importing pre-built app schemas without going through
+   * the discovery/AI flow. Useful for testing and development.
+   */
+  server.post<{
+    Body: {
+      schema: Record<string, unknown>;
+    };
+  }>(
+    '/api/apps/import',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['schema'],
+          properties: {
+            schema: { type: 'object' },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: { schema: Record<string, unknown> } }>, reply: FastifyReply) => {
+      try {
+        const { schema } = request.body;
+        
+        console.log('📥 Importing pre-built app schema...');
+        logger.info('App import requested', { 
+          appId: schema.id,
+          appName: schema.name,
+        });
+        
+        // Validate required fields
+        if (!schema.id || !schema.name) {
+          return reply.code(400).type('application/json').send({
+            success: false,
+            error: 'Invalid schema',
+            message: 'Schema must have id and name fields',
+          });
+        }
+        
+        // Create the app object - use type assertion for flexibility with pre-built schemas
+        const app = {
+          id: schema.id as string,
+          name: schema.name as string,
+          description: (schema.description as string) || '',
+          category: (schema.category || 'personal') as AppCategory,
+          privacyLevel: AppPrivacyLevel.PRIVATE,
+          version: (schema.version as number) || 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          createdBy: 'import',
+          schema: schema as any, // Pre-built schemas may have extended properties
+          theme: (schema.theme || { colors: { primary: '#8b5cf6' } }) as any,
+          data: (schema.data || {}) as Record<string, unknown[]>,
+          settings: (schema.settings || {}) as Record<string, unknown>,
+        } as App;
+        
+        // Store in memory
+        appStore.set(app.id, app);
+        
+        // Persist to storage
+        try {
+          await appRepository.save({
+            id: app.id,
+            name: app.name,
+            description: app.description,
+            category: app.category,
+            schema: app.schema as Record<string, unknown>,
+            theme: app.theme as Record<string, unknown>,
+            data: app.data as Record<string, unknown>,
+            settings: app.settings as Record<string, unknown>,
+            userId: 'import',
+            isPublic: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          logger.info('App persisted to storage', { appId: app.id });
+        } catch (storageError: any) {
+          logger.warn('Failed to persist app to storage', { 
+            appId: app.id, 
+            error: storageError?.message 
+          });
+        }
+        
+        console.log('✅ App imported successfully:', app.id);
+        
+        return reply.code(200).type('application/json').send({
+          success: true,
+          app: {
+            id: app.id,
+            name: app.name,
+            description: app.description,
+            previewUrl: `/preview/${app.id}`,
+          },
+        });
+        
+      } catch (error: any) {
+        console.error('Import endpoint error:', error);
+        logger.error('App import failed', error);
+        
+        return reply.code(500).type('application/json').send({
+          success: false,
+          error: 'Internal server error',
+          message: error?.message || 'An error occurred while importing the app',
         });
       }
     }

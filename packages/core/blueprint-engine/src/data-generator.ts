@@ -1,10 +1,14 @@
 /**
  * Entity & Data Generator
  * Generates tables, fields, relations, and sample data from blueprint
+ * 
+ * ENHANCED: Now integrates with data-generator-templates for rich,
+ * industry-specific sample data with real names, avatars, and contact info.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { AppBlueprint, EntityDef, FieldDef } from './types.js';
+import { getSampleDataForEntity } from './data-generator-templates.js';
 
 // ============================================================
 // DATA TYPES
@@ -184,16 +188,31 @@ export class DataGenerator {
 
   /**
    * Generate sample data for all entities
+   * ENHANCED: Now uses industry-specific templates when available for rich, realistic data
    */
   generateSampleData(blueprint: AppBlueprint, recordsPerEntity: number = 5): GeneratedData {
     this.referenceCache.clear();
     const data: GeneratedData = {};
 
     // First pass: Generate all records (needed for references)
+    // Try to use template data first for rich, industry-specific content
+    // Extract industry from blueprint behavior or name for contextual templates
+    const industry = blueprint.behavior || blueprint.name || '';
+    
     for (const entity of blueprint.entities) {
-      const records = this.generateEntityRecords(entity, recordsPerEntity);
-      data[entity.id] = records;
-      this.referenceCache.set(entity.id, records);
+      const templateData = getSampleDataForEntity(entity.id, industry);
+      
+      if (templateData.length > 0) {
+        // Use template data - it has rich, realistic content
+        const records = this.enrichTemplateData(entity, templateData, recordsPerEntity);
+        data[entity.id] = records;
+      } else {
+        // Fall back to generic generation
+        const records = this.generateEntityRecords(entity, recordsPerEntity);
+        data[entity.id] = records;
+      }
+      
+      this.referenceCache.set(entity.id, data[entity.id]);
     }
 
     // Second pass: Resolve references
@@ -213,6 +232,106 @@ export class DataGenerator {
     }
 
     return data;
+  }
+  
+  /**
+   * Enrich template data with IDs, timestamps, and any missing fields
+   * Also adds avatars for person entities and images for item entities
+   */
+  private enrichTemplateData(
+    entity: EntityDef,
+    templateData: Array<Record<string, unknown>>,
+    maxRecords: number
+  ): GeneratedRecord[] {
+    const records: GeneratedRecord[] = [];
+    const isPerson = this.isPersonEntity(entity);
+    const isItem = this.isItemEntity(entity);
+    
+    // Use template data up to maxRecords, cycling if needed
+    for (let i = 0; i < maxRecords; i++) {
+      const templateRecord = templateData[i % templateData.length];
+      const record: GeneratedRecord = {
+        id: randomUUID(),
+        ...templateRecord,
+      };
+      
+      // Add avatar for person entities if not present
+      if (isPerson && !record.avatar && !record.image && !record.photo) {
+        const name = (record.name as string) || 'User';
+        record.avatar = this.generateAvatarUrl(name, i);
+      }
+      
+      // Add image for item entities if not present
+      if (isItem && !record.image && !record.photo) {
+        const itemName = (record.name as string) || entity.id;
+        record.image = this.generateItemImageUrl(itemName, entity.id, i);
+      }
+      
+      // Add timestamps if not present
+      if (!record.createdAt) {
+        const now = new Date();
+        const createdAt = new Date(now.getTime() - Math.random() * 30 * 24 * 60 * 60 * 1000);
+        record.createdAt = createdAt.toISOString();
+      }
+      if (!record.updatedAt) {
+        const createdAt = new Date(record.createdAt as string);
+        record.updatedAt = new Date(createdAt.getTime() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString();
+      }
+      
+      records.push(record);
+    }
+    
+    return records;
+  }
+  
+  /**
+   * Check if entity represents a person type
+   */
+  private isPersonEntity(entity: EntityDef): boolean {
+    const nameLower = entity.name.toLowerCase();
+    const personKeywords = [
+      'member', 'client', 'customer', 'patient', 'contact',
+      'user', 'employee', 'staff', 'student', 'tenant', 'guest',
+      'visitor', 'lead', 'prospect', 'homeowner', 'caregiver',
+      'recipient', 'owner', 'instructor', 'trainer', 'technician',
+      'provider', 'attendee', 'participant', 'person', 'people'
+    ];
+    return personKeywords.some(k => nameLower.includes(k));
+  }
+  
+  /**
+   * Check if entity represents an item/product type
+   */
+  private isItemEntity(entity: EntityDef): boolean {
+    const nameLower = entity.name.toLowerCase();
+    const itemKeywords = [
+      'product', 'item', 'material', 'equipment', 'inventory',
+      'menu', 'dish', 'food', 'service', 'package', 'plan',
+      'class', 'course', 'property', 'vehicle', 'part'
+    ];
+    return itemKeywords.some(k => nameLower.includes(k));
+  }
+  
+  /**
+   * Generate avatar URL for person entities
+   * Uses initials-based avatars with consistent colors per person
+   */
+  private generateAvatarUrl(name: string, index: number): string {
+    // Use UI Avatars for nice, consistent avatars based on name
+    const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2);
+    const colors = ['6366f1', '8b5cf6', 'ec4899', '14b8a6', 'f59e0b', '10b981', '3b82f6', 'ef4444'];
+    const bgColor = colors[index % colors.length];
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=${bgColor}&color=fff&size=128`;
+  }
+  
+  /**
+   * Generate image URL for item entities
+   * Uses placeholder images with consistent seeds
+   */
+  private generateItemImageUrl(itemName: string, entityId: string, index: number): string {
+    // Use Lorem Picsum with seed for consistent images
+    const seed = `${entityId}-${itemName.replace(/\s+/g, '-')}-${index}`;
+    return `https://picsum.photos/seed/${encodeURIComponent(seed)}/400/300`;
   }
 
   /**
@@ -323,7 +442,12 @@ export class DataGenerator {
       case 'url':
         return `https://example.com/${entity.id}/${index + 1}`;
       case 'image':
-        return `https://picsum.photos/seed/${entity.id}${index}/400/300`;
+        // Generate avatar for person entities, product image for items
+        if (this.isPersonEntity(entity) || fieldName === 'avatar' || fieldName === 'photo') {
+          const name = `${this.pickRandom(SAMPLE_DATA.names.first)} ${this.pickRandom(SAMPLE_DATA.names.last)}`;
+          return this.generateAvatarUrl(name, index);
+        }
+        return this.generateItemImageUrl(entity.name, entity.id, index);
       case 'currency':
         return Math.round(Math.random() * 10000 + 100) / 100;
       case 'percentage':
@@ -337,13 +461,24 @@ export class DataGenerator {
 
   /**
    * Generate a contextual name based on entity type
+   * ENHANCED: Now handles many more person-type entities (member, guest, tenant, etc.)
    */
   private generateContextualName(entity: EntityDef, index: number): string {
     const entityName = entity.name.toLowerCase();
 
-    if (entityName.includes('contact') || entityName.includes('client') || entityName.includes('customer') || entityName.includes('person')) {
+    // Person types - generate realistic person names
+    const personKeywords = [
+      'contact', 'client', 'customer', 'person', 'member', 'tenant',
+      'guest', 'visitor', 'patient', 'student', 'employee', 'staff',
+      'user', 'lead', 'prospect', 'homeowner', 'caregiver', 'recipient',
+      'owner', 'instructor', 'trainer', 'technician', 'provider',
+      'attendee', 'participant'
+    ];
+    
+    if (personKeywords.some(k => entityName.includes(k))) {
       return `${this.pickRandom(SAMPLE_DATA.names.first)} ${this.pickRandom(SAMPLE_DATA.names.last)}`;
     }
+    
     if (entityName.includes('company') || entityName.includes('organization')) {
       return this.pickRandom(SAMPLE_DATA.names.company);
     }
@@ -376,6 +511,25 @@ export class DataGenerator {
     }
     if (entityName.includes('service')) {
       return this.pickRandom(['Consultation', 'Installation', 'Maintenance', 'Training', 'Support Package', 'Premium Service']);
+    }
+    // Menu items / food
+    if (entityName.includes('menu') || entityName.includes('dish') || entityName.includes('food')) {
+      return this.pickRandom([
+        'Grilled Salmon', 'Caesar Salad', 'Ribeye Steak', 'Pasta Carbonara',
+        'Chicken Parmesan', 'Margherita Pizza', 'Thai Curry', 'Fish Tacos'
+      ]);
+    }
+    // Materials / inventory
+    if (entityName.includes('material') || entityName.includes('inventory')) {
+      return this.pickRandom([
+        'Copper Pipe 1/2"', 'PVC Elbow 90°', 'Wire 12 AWG', 'Circuit Breaker 20A',
+        'Drywall Sheet 4x8', 'Joint Compound 5gal', 'Paint - Interior White'
+      ]);
+    }
+    // Reservations
+    if (entityName.includes('reservation') || entityName.includes('booking')) {
+      const names = [`${this.pickRandom(SAMPLE_DATA.names.first)} ${this.pickRandom(SAMPLE_DATA.names.last)}`];
+      return `${names[0]} - Table ${Math.floor(Math.random() * 20) + 1}`;
     }
 
     // Default

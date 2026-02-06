@@ -23,19 +23,19 @@ export const Badge: React.FC<BadgeProps> = ({
     default: 'default',
     primary: 'default',
     secondary: 'secondary',
-    success: 'default',
-    warning: 'secondary',
+    success: 'secondary', // Will be overridden by color classes
+    warning: 'secondary', // Will be overridden by color classes
     error: 'destructive',
-    info: 'secondary',
+    info: 'secondary', // Will be overridden by color classes
     destructive: 'destructive',
     outline: 'outline',
   };
 
-  // Add color classes based on variant for custom colors
+  // Add theme-aware color classes based on variant (uses CSS variable tokens)
   const colorClasses: Record<string, string> = {
-    success: 'bg-green-100 text-green-800 hover:bg-green-100/80',
-    warning: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100/80',
-    info: 'bg-blue-100 text-blue-800 hover:bg-blue-100/80',
+    success: 'bg-[hsl(var(--success-bg,142_76%_95%))] text-[hsl(var(--success,142_71%_45%))] hover:bg-[hsl(var(--success-bg,142_76%_95%)/0.8)] dark:bg-[hsl(var(--success)/0.2)] dark:text-[hsl(var(--success))] border-transparent',
+    warning: 'bg-[hsl(var(--warning-bg,45_93%_95%))] text-[hsl(var(--warning,45_93%_47%))] hover:bg-[hsl(var(--warning-bg,45_93%_95%)/0.8)] dark:bg-[hsl(var(--warning)/0.2)] dark:text-[hsl(var(--warning))] border-transparent',
+    info: 'bg-[hsl(var(--info-bg,201_96%_95%))] text-[hsl(var(--info,201_96%_32%))] hover:bg-[hsl(var(--info-bg,201_96%_95%)/0.8)] dark:bg-[hsl(var(--info)/0.2)] dark:text-[hsl(var(--info))] border-transparent',
     primary: 'bg-primary text-primary-foreground hover:bg-primary/80',
   };
 

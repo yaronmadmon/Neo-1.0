@@ -45,6 +45,14 @@ body {
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    
+    /* Surface layers - default to neutral-professional */
+    /* These create visual depth: app → section → card */
+    --surface-app: 210 40% 96%;        /* Cool slate background */
+    --surface-section: 210 40% 98%;    /* Slightly lighter panels */
+    --surface-card: 0 0% 100%;         /* White cards */
+    --surface-app-foreground: 215 25% 27%;  /* Text on app background */
+    --surface-divider: 214 32% 91%;    /* Divider color */
   }
 
   .dark {
@@ -80,6 +88,13 @@ body {
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    
+    /* Surface layers - dark mode (modern-dark) */
+    --surface-app: 222 47% 6%;         /* Dark slate background */
+    --surface-section: 222 47% 11%;    /* Elevated slate panels */
+    --surface-card: 222 47% 15%;       /* Card slate */
+    --surface-app-foreground: 210 40% 96%;  /* Light text */
+    --surface-divider: 217 33% 17%;    /* Dark divider */
   }
 }
 

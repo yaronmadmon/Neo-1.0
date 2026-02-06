@@ -389,6 +389,22 @@ export class NavigationBuilder {
       'settings': '⚙️',
       'profile': '👤',
       'custom': '📄',
+      // Customer-specific page types (e-commerce)
+      'menu': '🍽️',
+      'cart': '🛒',
+      'checkout': '💳',
+      'booking': '📆',
+      'order_tracking': '📦',
+      'customer_portal': '🏠',
+      // Tenant/member portal page types
+      'tenant_portal': '🏠',
+      'lease_view': '📜',
+      'rent_payment': '💳',
+      'maintenance_request': '🔧',
+      'document_library': '📁',
+      'notices_board': '📢',
+      'message_center': '💬',
+      'facility_booking': '🏢',
     };
 
     return iconMap[pageType] || '📄';
